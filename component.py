@@ -150,9 +150,9 @@ class Component(Scheduler, Messager):
         while self._should_run:
             self.now = time.time()
 
-            time_to_nearest = .1
+            time_to_nearest = .5 # avoid busy waiting by making default wait non zero
             if self._timeouts:
-                time_to_nearest = max(.1, self._timeouts[0].deadline - self.now)
+                time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
 
             try:
                 operation_name, message = self._tasks.get(timeout=time_to_nearest)
