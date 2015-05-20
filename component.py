@@ -2,6 +2,8 @@
 
 import heapq
 import functools
+import signal
+import sys
 import threading
 import time
 import queue
@@ -38,7 +40,7 @@ class Scheduler:
         if self._cancellations > 512 and \
            self._cancellations > (len(self._timeouts) >> 1):
                 self._cancellations = 0
-                self._timeouts = [x for x in self._timeouts 
+                self._timeouts = [x for x in self._timeouts
                                   if x.callback is not None]
                 heapq.heapify(self._timeouts)
 
@@ -89,7 +91,7 @@ class Messager:
 
 
     def connect_port(self, port_name, target_component, operation_name):
-        """ This method should be only used by connecting mechanism.  
+        """ This method should be only used by connecting mechanism.
         """
         port = self._ports[port_name]
         port._targets.append((target_component, operation_name))
@@ -111,7 +113,7 @@ class Messager:
         def __init__(self, name):
             self.name = name
             self._targets = []
-            
+
 
 
 
@@ -127,9 +129,7 @@ class Component(Scheduler, Messager):
         self._should_run = True
 
     def stop(self):
-        print("stopping")
         self._should_run = False
-        print("joining")
         self._thread.join()
 
     def start(self):
@@ -142,9 +142,9 @@ class Component(Scheduler, Messager):
         while self._should_run:
             self.now = time.time()
 
-            time_to_nearest = 0.1
+            time_to_nearest = .1
             if self._timeouts:
-                time_to_nearest = max(0.1, self._timeouts[0].deadline - self.now)
+                time_to_nearest = max(.1, self._timeouts[0].deadline - self.now)
 
             try:
                 operation_name, message = self._tasks.get(timeout=time_to_nearest)
@@ -196,14 +196,17 @@ if __name__ == "__main__":
 
     counter.connect_port("count", printer, "print")
 
-    try:
-        counter.start()
-        printer.start()
-    except KeyboardInterrupt:
-        print("interrupt")
+
+    def signal_stop_handler(sig, frame):
+        print("\nSTOP signal received.", file=sys.stderr)
         counter.stop()
         printer.stop()
 
-    while True:
-        time.sleep(1)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, signal_stop_handler)
+
+
+    # START!
+    counter.start()
+    printer.start()
 
