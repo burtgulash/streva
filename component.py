@@ -10,7 +10,7 @@ import time
 import queue
 
 
-class Scheduler:
+class Scheduled:
 
     def __init__(self):
         self._timeouts = []
@@ -123,17 +123,16 @@ class Messager:
                 target_component.send(operation_name, message)
 
 
-
-
-class Component(Scheduler, Messager):
+class Component(Scheduled, Messager):
 
     def __init__(self):
-        Scheduler.__init__(self)
+        Scheduled.__init__(self)
         Messager.__init__(self)
 
         self._tasks = queue.Queue()
 
         self._thread = None
+        self._is_dead = False
         self._should_run = True
 
     def stop(self):
@@ -144,28 +143,36 @@ class Component(Scheduler, Messager):
         self._thread = threading.Thread(target=self._run)
         self._thread.start()
 
+    def is_dead(self):
+        return self._is_dead
+
     def _run(self):
         self.on_start()
 
-        while self._should_run:
-            self.now = time.time()
+        try:
+            while self._should_run:
+                self.now = time.time()
 
-            time_to_nearest = .5 # avoid busy waiting by making default wait non zero
-            if self._timeouts:
-                time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+                time_to_nearest = .5 # avoid busy waiting by making default wait non zero
+                if self._timeouts:
+                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
 
-            try:
-                operation_name, message = self._tasks.get(timeout=time_to_nearest)
-            except queue.Empty:
-                self._process_timeouts()
-            else:
-                fn = self._operations[operation_name]
-                fn(message)
+                try:
+                    operation_name, message = self._tasks.get(timeout=time_to_nearest)
+                except queue.Empty:
+                    self._process_timeouts()
+                else:
+                    fn = self._operations[operation_name]
+                    fn(message)
 
-            # print("test")
+                # print("test")
 
-            self.on_after_task()
+                self.on_after_task()
+        except:
+# http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
+            logging.exception("Component failed on exception!")
 
+        self._is_dead = True
         self.on_end()
 
 
@@ -198,6 +205,7 @@ class Printer(Component):
     def on_print(self, count):
         logging.info("printing " + str(count))
         print("Count is:", count)
+        # raise Exception("kkt")
 
 
 if __name__ == "__main__":
