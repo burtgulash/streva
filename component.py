@@ -85,35 +85,42 @@ class Messager:
         self._operations = {}
 
     def make_port(self, name):
-        self._ports[name] = self._Port(name)
+        port = self._Port(name)
+        self._ports[name] = port
+        return port
 
     def add_handler(self, name, handler):
         self._operations[name] = handler
 
 
     def connect_port(self, port_name, target_component, operation_name):
-        """ This method should be only used by connecting mechanism.
+        """ Wires channels between components.
+
+        This method should only be used by connecting mechanism.
         """
         port = self._ports[port_name]
         port._targets.append((target_component, operation_name))
 
-    def send(self, port_name, message):
-        port = self._ports[port_name]
-        for target_component, operation_name in port._targets:
-            target_component.receive(operation_name, message)
-
-    def receive(self, operation_name, message):
+    def send(self, operation_name, message):
+        """ Send message to this component's operation.
+        """
         self._tasks.put((operation_name, message))
 
 
     class _Port:
         """ Port is a named set of components to all of which an outbound
-        message will be sent through this port.
+        message will be sent through this port. Port implements pubsub routing.
         """
 
         def __init__(self, name):
             self.name = name
             self._targets = []
+
+        def send(self, message):
+            """ Send message to all connected components through this pubsub port.
+            """
+            for target_component, operation_name in self._targets:
+                target_component.send(operation_name, message)
 
 
 
@@ -168,12 +175,12 @@ class Counter(Component):
     def __init__(self, count_from):
         Component.__init__(self)
 
-        self.make_port("count")
+        self.out_port = self.make_port("count")
         self.count = count_from
 
     def on_start(self):
         def cb():
-            self.send("count", self.count)
+            self.out_port.send(self.count)
             self.count += 1
 
             self.call_later(1, cb)
