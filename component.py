@@ -10,72 +10,6 @@ import time
 import queue
 
 
-class Scheduled:
-
-    def __init__(self):
-        self._timeouts = []
-        self._cancellations = 0
-
-    def on_start(self):
-        """ Override """
-        pass
-
-    def on_end(self):
-        """ Override """
-        pass
-
-    def on_after_task(self):
-        """ Override """
-        pass
-
-    def _process_timeouts(self):
-        due_timeouts = []
-        while self._timeouts:
-            if self._timeouts[0].callback is None:
-                heapq.heappop(self._timeouts)
-                self._cancellations -= 1
-            elif self._timeouts[0].deadline <= self.now:
-                due_timeouts.append(heapq.heappop(self._timeouts))
-            else:
-                break
-        if self._cancellations > 512 and \
-           self._cancellations > (len(self._timeouts) >> 1):
-                self._cancellations = 0
-                self._timeouts = [x for x in self._timeouts
-                                  if x.callback is not None]
-                heapq.heapify(self._timeouts)
-
-        for timeout in due_timeouts:
-            if timeout.callback is not None:
-                timeout.callback()
-
-    def call_later(self, delay, callback, *args, **kwargs):
-        return self.call_at(time.time() + delay, callback, *args, **kwargs)
-
-    def call_at(self, deadline, callback, *args, **kwargs):
-        timeout = self._Timeout(deadline, functools.partial(callback, *args, **kwargs))
-        heapq.heappush(self._timeouts, timeout)
-        return timeout
-
-    def remove_timeout(self, timeout):
-        timeout.callback = None
-        self._cancellations += 1
-
-
-    class _Timeout:
-
-        __slots__ = ["deadline", "callback"]
-
-        def __init__(self, deadline, callback):
-            self.deadline = deadline
-            self.callback = callback
-
-        def __lt__(self, other):
-            return self.deadline < other.deadline
-
-        def __le__(self, other):
-            return self.deadline <= other.deadline
-
 
 class Messager:
 
@@ -122,15 +56,26 @@ class Messager:
             for target_component, operation_name in self._targets:
                 target_component.send(operation_name, message)
 
+class State:
 
-class Component(Scheduled, Messager):
+    self.operations_stats = {}
+
+
+
+class Component(Messager):
 
     def __init__(self):
-        Scheduled.__init__(self)
         Messager.__init__(self)
 
+        # Scheduling
         self._tasks = queue.Queue()
+        self._timeouts = []
+        self._cancellations = 0
 
+        # Monitoring
+        self._state = {}
+
+        # Running
         self._thread = None
         self._is_dead = False
         self._should_run = True
@@ -145,6 +90,55 @@ class Component(Scheduled, Messager):
 
     def is_dead(self):
         return self._is_dead
+
+    def _process_operation(self, operation_name, message):
+        fn = self._operations[operation_name]
+        fn(message)
+
+    def on_start(self):
+        """ Override """
+        pass
+
+    def on_end(self):
+        """ Override """
+        pass
+
+    def on_after_task(self):
+        """ Override """
+        pass
+
+    def _process_timeouts(self):
+        due_timeouts = []
+        while self._timeouts:
+            if self._timeouts[0].callback is None:
+                heapq.heappop(self._timeouts)
+                self._cancellations -= 1
+            elif self._timeouts[0].deadline <= self.now:
+                due_timeouts.append(heapq.heappop(self._timeouts))
+            else:
+                break
+        if self._cancellations > 512 and \
+           self._cancellations > (len(self._timeouts) >> 1):
+                self._cancellations = 0
+                self._timeouts = [x for x in self._timeouts
+                                  if x.callback is not None]
+                heapq.heapify(self._timeouts)
+
+        for timeout in due_timeouts:
+            if timeout.callback is not None:
+                timeout.callback()
+
+    def call_later(self, delay, callback, *args, **kwargs):
+        return self.call_at(time.time() + delay, callback, *args, **kwargs)
+
+    def call_at(self, deadline, callback, *args, **kwargs):
+        timeout = self._Timeout(deadline, functools.partial(callback, *args, **kwargs))
+        heapq.heappush(self._timeouts, timeout)
+        return timeout
+
+    def remove_timeout(self, timeout):
+        timeout.callback = None
+        self._cancellations += 1
 
     def _run(self):
         self.on_start()
@@ -162,8 +156,8 @@ class Component(Scheduled, Messager):
                 except queue.Empty:
                     self._process_timeouts()
                 else:
-                    fn = self._operations[operation_name]
-                    fn(message)
+                    self._process_operation(operation_name, message)
+
 
                 # print("test")
 
@@ -174,6 +168,21 @@ class Component(Scheduled, Messager):
 
         self._is_dead = True
         self.on_end()
+
+
+    class _Timeout:
+
+        __slots__ = ["deadline", "callback"]
+
+        def __init__(self, deadline, callback):
+            self.deadline = deadline
+            self.callback = callback
+
+        def __lt__(self, other):
+            return self.deadline < other.deadline
+
+        def __le__(self, other):
+            return self.deadline <= other.deadline
 
 
 
