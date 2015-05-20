@@ -2,6 +2,7 @@
 
 import heapq
 import functools
+import logging
 import signal
 import sys
 import threading
@@ -161,6 +162,7 @@ class Component(Scheduler, Messager):
         self.on_end()
 
 
+
 class Counter(Component):
 
     def __init__(self, count_from):
@@ -187,6 +189,7 @@ class Printer(Component):
         self.add_handler("print", self.on_print)
 
     def on_print(self, count):
+        logging.info("printing " + str(count))
         print("Count is:", count)
 
 
@@ -197,8 +200,12 @@ if __name__ == "__main__":
     counter.connect_port("count", printer, "print")
 
 
+    logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s",
+                        datefmt="%I:%M:%S",
+                        level=logging.INFO)
+
     def signal_stop_handler(sig, frame):
-        print("\nSTOP signal received.", file=sys.stderr)
+        logging.info("STOP signal received.")
         counter.stop()
         printer.stop()
 
