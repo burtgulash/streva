@@ -11,21 +11,49 @@ import queue
 
 
 
-class Messager:
+
+class Stats:
 
     def __init__(self):
+        self.operation_stats = {}
+        self.queue_size = 0
+
+    class OperationStats:
+
+        def __init__(self):
+            self.runs = 0
+            self.total_time = 0
+
+
+class Component:
+
+    def __init__(self):
+
+        # Scheduling
+        self._tasks = queue.Queue()
+        self._timeouts = []
+        self._cancellations = 0
+
         # Message routing
         self._ports = {}
         self._operations = {}
+
+        # Monitoring
+        self.stats = Stats()
+
+        # Running
+        self._thread = None
+        self._is_dead = False
+        self._should_run = True
 
     def make_port(self, name):
         port = self._Port(name)
         self._ports[name] = port
         return port
 
-    def add_handler(self, name, handler):
-        self._operations[name] = handler
-
+    def add_handler(self, operation_name, handler):
+        self._operations[operation_name] = handler
+        self.stats.operation_stats[operation_name] = Stats.OperationStats()
 
     def connect_port(self, port_name, target_component, operation_name):
         """ Wires channels between components.
@@ -40,46 +68,6 @@ class Messager:
         """
         self._tasks.put((operation_name, message))
 
-
-    class _Port:
-        """ Port is a named set of components to all of which an outbound
-        message will be sent through this port. Port implements pubsub routing.
-        """
-
-        def __init__(self, name):
-            self.name = name
-            self._targets = []
-
-        def send(self, message):
-            """ Send message to all connected components through this pubsub port.
-            """
-            for target_component, operation_name in self._targets:
-                target_component.send(operation_name, message)
-
-class State:
-
-    self.operations_stats = {}
-
-
-
-class Component(Messager):
-
-    def __init__(self):
-        Messager.__init__(self)
-
-        # Scheduling
-        self._tasks = queue.Queue()
-        self._timeouts = []
-        self._cancellations = 0
-
-        # Monitoring
-        self._state = {}
-
-        # Running
-        self._thread = None
-        self._is_dead = False
-        self._should_run = True
-
     def stop(self):
         self._should_run = False
         self._thread.join()
@@ -93,7 +81,16 @@ class Component(Messager):
 
     def _process_operation(self, operation_name, message):
         fn = self._operations[operation_name]
+
+        start_time = time.time()
         fn(message)
+        running_time = time.time() - start_time
+
+        op_stats = self.stats.operation_stats[operation_name]
+        op_stats.runs += 1
+        op_stats.total_time += running_time
+
+
 
     def on_start(self):
         """ Override """
@@ -158,10 +155,8 @@ class Component(Messager):
                 else:
                     self._process_operation(operation_name, message)
 
-
-                # print("test")
-
                 self.on_after_task()
+                self.stats.queue_size = self._tasks.qsize()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")
@@ -183,6 +178,22 @@ class Component(Messager):
 
         def __le__(self, other):
             return self.deadline <= other.deadline
+
+
+    class _Port:
+        """ Port is a named set of components to all of which an outbound
+        message will be sent through this port. Port implements pubsub routing.
+        """
+
+        def __init__(self, name):
+            self.name = name
+            self._targets = []
+
+        def send(self, message):
+            """ Send message to all connected components through this pubsub port.
+            """
+            for target_component, operation_name in self._targets:
+                target_component.send(operation_name, message)
 
 
 
