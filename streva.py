@@ -39,6 +39,15 @@ class Stats:
 
 
 class Component:
+    """ Component class is an implementation of scheduled event loop.
+
+    A component can be sent messages to, which are then in turn handled by
+    component's handlers. Sleeping on the thread is implemented by timeouts,
+    which are callbacks delayed on the component's scheduler calendar.
+
+    Components can route outgoing messages through Ports. Port is a publisher
+    mechanism, which sends messages to its subscribers.
+    """
 
     def __init__(self):
 
@@ -72,10 +81,10 @@ class Component:
         self._operations[operation_name] = handler
         self.stats.register_operation_stats(operation_name)
 
-    def connect_port(self, port_name, target_component, operation_name):
-        """ Wires channels between components.
-
-        This method should only be used by connecting mechanism.
+    def subscribe(self, port_name, target_component, operation_name):
+        """ Subscribe another component to this component's port_name to
+        receive messages published by this port. Wire components together using
+        this method.
         """
         port = self._ports[port_name]
         port._targets.append((target_component, operation_name))
@@ -227,6 +236,10 @@ class Component:
 
 
 class IOComponent(Component):
+    """ Component which can accept and send events to outside world through
+    file descriptors.  Internal implementation is based on 'select.epoll',
+    therefore it only works on machines supporting epoll.
+    """
 
     def __init__(self):
         Component.__init__(self)
@@ -315,7 +328,8 @@ def test():
     counter = Counter(1)
     printer = Printer()
 
-    counter.connect_port("count", printer, "print")
+    # Subscribe 'printer.print' to 'counter.count'
+    counter.subscribe("count", printer, "print")
 
 
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s",
@@ -338,3 +352,4 @@ def test():
 
 if __name__ == "__main__":
     test()
+
