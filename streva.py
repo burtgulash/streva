@@ -402,8 +402,7 @@ def test():
     printer.connect("out", sq_printer, "print")
 
     # Set up logging
-    logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s",
-                        datefmt="%I:%M:%S",
+    logging.basicConfig(format="%(levelname)s -- %(message)s",
                         level=logging.INFO)
 
     # Register all components within supervisor and start them
