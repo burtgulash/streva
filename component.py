@@ -151,29 +151,62 @@ class Component(Scheduled, Messager):
 
         try:
             while self._should_run:
-                self.now = time.time()
-
-                time_to_nearest = .5 # avoid busy waiting by making default wait non zero
-                if self._timeouts:
-                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
-
-                try:
-                    operation_name, message = self._tasks.get(timeout=time_to_nearest)
-                except queue.Empty:
-                    self._process_timeouts()
-                else:
-                    fn = self._operations[operation_name]
-                    fn(message)
-
-                # print("test")
-
-                self.on_after_task()
+                self._loop_iteration()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")
 
         self._is_dead = True
         self.on_end()
+
+    def _loop_iteration(self):
+        self.now = time.time()
+
+        time_to_nearest = .5 # avoid busy waiting by making default wait non zero
+        if self._timeouts:
+            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+        try:
+            operation_name, message = self._tasks.get(timeout=time_to_nearest)
+        except queue.Empty:
+            self._process_timeouts()
+        else:
+            fn = self._operations[operation_name]
+            fn(message)
+
+        # print("test")
+
+        self.on_after_task()
+
+
+
+class IOComponent(Component):
+
+    def __init__(self):
+        Component.__init__(self)
+
+    def _loop_iteration(self):
+        self.now = time.time()
+
+        time_to_nearest = .5 # avoid busy waiting by making default wait non zero
+        if self._timeouts:
+            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+        try:
+            operation_name, message = self._tasks.get(timeout=time_to_nearest)
+        except queue.Empty:
+            self._process_timeouts()
+        else:
+            fn = self._operations[operation_name]
+            fn(message)
+
+        # print("test")
+
+        self.on_after_task()
+
+
+
+
 
 
 
