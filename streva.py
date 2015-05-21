@@ -279,6 +279,31 @@ class IOComponent(Component):
 
 
 
+class Supervisor:
+
+    def __init__(self):
+        self._components = []
+
+        # Register signal handler for stop signals
+        def signal_stop_handler(sig, frame):
+            logging.info("STOP signal received.")
+            self.stop_all()
+
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, signal_stop_handler)
+
+    def add(self, component):
+        self._components.append(component)
+
+    def start_all(self):
+        for component in self._components:
+            component.start()
+
+    def stop_all(self):
+        for component in self._components:
+            component.stop()
+
+
 
 
 # T
@@ -349,25 +374,18 @@ def test():
     counter.connect("count", printer, "print")
     printer.connect("out", sq_printer, "print")
 
-
+    # Set up logging
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s",
                         datefmt="%I:%M:%S",
                         level=logging.INFO)
 
-    def signal_stop_handler(sig, frame):
-        logging.info("STOP signal received.")
-        counter.stop()
-        printer.stop()
-        sq_printer.stop()
+    # Register all components within supervisor and start them
+    supervisor = Supervisor()
+    supervisor.add(counter)
+    supervisor.add(printer)
+    supervisor.add(sq_printer)
 
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, signal_stop_handler)
-
-
-    # START!
-    counter.start()
-    printer.start()
-    sq_printer.start()
+    supervisor.start_all()
 
 
 if __name__ == "__main__":
