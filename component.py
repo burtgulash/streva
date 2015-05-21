@@ -211,7 +211,12 @@ class Component:
 
 
 
+#
+# Basic test so that this module can be tested immediately
 class Counter(Component):
+    """ Sample implementation of Component which generates sequence of numbers
+    in periodic intervals and sends them out for printing.
+    """
 
     def __init__(self, count_from):
         Component.__init__(self)
@@ -230,6 +235,9 @@ class Counter(Component):
 
 
 class Printer(Component):
+    """ Sample implementation of Component which simply prints numbers received
+    from Counter.
+    """
 
     def __init__(self):
         Component.__init__(self)
@@ -241,8 +249,7 @@ class Printer(Component):
         print("Count is:", count)
         # raise Exception("kkt")
 
-
-if __name__ == "__main__":
+def test():
     counter = Counter(1)
     printer = Printer()
 
@@ -266,3 +273,6 @@ if __name__ == "__main__":
     counter.start()
     printer.start()
 
+
+if __name__ == "__main__":
+    test()
