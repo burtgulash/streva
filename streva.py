@@ -81,13 +81,12 @@ class Component:
         self._operations[operation_name] = handler
         self.stats.register_operation_stats(operation_name)
 
-    def subscribe(self, port_name, target_component, operation_name):
-        """ Subscribe another component to this component's port_name to
-        receive messages published by this port. Wire components together using
-        this method.
-        """
+    def connect(self, port_name, to_component, to_operation_name):
         port = self._ports[port_name]
-        port._targets.append((target_component, operation_name))
+        port._targets.append((to_component, to_operation_name))
+
+    def subscribe(self, operation_name, source_component, source_port_name):
+        source_component.connect(source_port_name, self, operation_name)
 
     def send(self, operation_name, message):
         """ Send message to this component's operation.
@@ -294,7 +293,7 @@ class Counter(Component):
     """
 
     def __init__(self, count_from):
-        Component.__init__(self)
+        super().__init__()
 
         self.out_port = self.make_port("count")
         self.count = count_from
@@ -315,21 +314,40 @@ class Printer(IOComponent):
     """
 
     def __init__(self):
-        IOComponent.__init__(self)
+        super().__init__()
 
         self.add_handler("print", self.on_print)
+        self.out_port = self.make_port("out")
 
     def on_print(self, count):
         logging.info("printing " + str(count))
         print("Count is:", count)
-        # raise Exception("kkt")
+        self.out_port.send(count)
+
+
+class SquaredPrinter(Component):
+    """ Square a number and print it. """
+
+    def __init__(self):
+        super().__init__()
+
+        self.add_handler("print", self.on_print)
+
+    def on_print(self, count):
+        count = count * count
+        logging.info("square printing " + str(count))
+        print("Count is:", count)
+
 
 def test():
     counter = Counter(1)
     printer = Printer()
+    sq_printer = SquaredPrinter()
 
-    # Subscribe 'printer.print' to 'counter.count'
-    counter.subscribe("count", printer, "print")
+    # Wire components together.
+    # eg. subscribe 'printer.print' to 'counter.count'
+    counter.connect("count", printer, "print")
+    printer.connect("out", sq_printer, "print")
 
 
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s",
@@ -340,6 +358,7 @@ def test():
         logging.info("STOP signal received.")
         counter.stop()
         printer.stop()
+        sq_printer.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
@@ -348,6 +367,7 @@ def test():
     # START!
     counter.start()
     printer.start()
+    sq_printer.start()
 
 
 if __name__ == "__main__":
