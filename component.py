@@ -116,30 +116,29 @@ class Component:
         self.stats.update_running_stats(operation_name, running_time, 1)
 
     def _process_timeouts(self):
-        if self._timeouts:
-            due_timeouts = []
-            while self._timeouts:
-                if self._timeouts[0].callback is None:
-                    heapq.heappop(self._timeouts)
-                    self._cancellations -= 1
-                elif self._timeouts[0].deadline <= self.now:
-                    due_timeouts.append(heapq.heappop(self._timeouts))
-                else:
-                    break
-            if self._cancellations > 512 and \
-               self._cancellations > (len(self._timeouts) >> 1):
-                    self._cancellations = 0
-                    self._timeouts = [x for x in self._timeouts
-                                      if x.callback is not None]
-                    heapq.heapify(self._timeouts)
+        due_timeouts = []
+        while self._timeouts:
+            if self._timeouts[0].callback is None:
+                heapq.heappop(self._timeouts)
+                self._cancellations -= 1
+            elif self._timeouts[0].deadline <= self.now:
+                due_timeouts.append(heapq.heappop(self._timeouts))
+            else:
+                break
+        if self._cancellations > 512 and \
+           self._cancellations > (len(self._timeouts) >> 1):
+                self._cancellations = 0
+                self._timeouts = [x for x in self._timeouts
+                                  if x.callback is not None]
+                heapq.heapify(self._timeouts)
 
-            no_timeouts = len(due_timeouts)
-            for timeout in due_timeouts:
-                if timeout.callback is not None:
-                    timeout.callback()
+        no_timeouts = len(due_timeouts)
+        for timeout in due_timeouts:
+            if timeout.callback is not None:
+                timeout.callback()
 
-            running_time = time.time() - self.now
-            self.stats.update_running_stats("timeouts", running_time, no_timeouts)
+        running_time = time.time() - self.now
+        self.stats.update_running_stats("timeouts", running_time, no_timeouts)
 
 
     def call_later(self, delay, callback, *args, **kwargs):
@@ -159,7 +158,20 @@ class Component:
 
         try:
             while self._should_run:
-                self._loop_iteration()
+                self.now = time.time()
+
+                time_to_nearest = self._WAIT_ON_EMPTY
+                if self._timeouts:
+                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+                # This is where all the action happens.
+                has_timeouted = self._process_events(time_to_nearest)
+
+                if self._timeouts:
+                    self._process_timeouts()
+
+                self.on_after_task()
+                self.stats.queue_size = self._tasks.qsize()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")
@@ -167,22 +179,20 @@ class Component:
         self._is_dead = True
         self.on_end()
 
-    def _loop_iteration(self):
-        self.now = time.time()
-
-        time_to_nearest = self._WAIT_ON_EMPTY
-        if self._timeouts:
-            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+    def _process_events(self, timeout):
+        """ Process events from component's queue.
+        Return True if timeouted, False otherwise.
+        """
 
         try:
-            operation_name, message = self._tasks.get(timeout=time_to_nearest)
+            operation_name, message = self._tasks.get(timeout=timeout)
         except queue.Empty:
-            self._process_timeouts()
+            # Timeout obtained means that a timeout event came before an event
+            # from the queue
+            return True
         else:
             self._process_operation(operation_name, message)
-
-        self.on_after_task()
-        self.stats.queue_size = self._tasks.qsize()
+            return False
 
 
     class _Timeout:
@@ -232,36 +242,29 @@ class IOComponent(Component):
     def send(self, operation_name, message):
         # Put task message into queue
         Component.send(self, operation_name, message)
-        # Signal about this event to epoll by sending a byte to it
+        # Signal about this event to epoll by sending a single byte to it
         os.write(self._operations_pipe[1], b'\0')
 
-    def process_poll_event(self, fd, event):
-        raise NotImplementedError("process_poll_event must be overriden")
+    def _process_events(self, timeout):
+        events = self._poll.poll(timeout)
+        if not events:
+            # No events -> timeout happened
+            return True
 
-    def _loop_iteration(self):
-        self.now = time.time()
-
-        time_to_nearest = self._WAIT_ON_EMPTY
-        if self._timeouts:
-            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
-
-        events = self._poll.poll(time_to_nearest)
         for fd, event in events:
             if fd == self._operations_pipe[0]:
-                # Consume the '\0' byte and process the operation
+                # Consume the '\0' byte sent by 'send' method and process the operation
                 os.read(fd, 1)
                 operation_name, message = self._tasks.get_nowait()
                 self._process_operation(operation_name, message)
             else:
                 self.process_poll_event(fd, event)
 
-        self._process_timeouts()
+        return False
 
-        self.on_after_task()
-        self.stats.queue_size = self._tasks.qsize()
+    def process_poll_event(self, fd, event):
+        raise NotImplementedError("process_poll_event must be overriden")
 
-
-        
 
 
 
@@ -272,13 +275,13 @@ class IOComponent(Component):
 # TEST
 #
 # Basic test so that this module can be tested immediately
-class Counter(IOComponent):
+class Counter(Component):
     """ Sample implementation of Component which generates sequence of numbers
     in periodic intervals and sends them out for printing.
     """
 
     def __init__(self, count_from):
-        IOComponent.__init__(self)
+        Component.__init__(self)
 
         self.out_port = self.make_port("count")
         self.count = count_from
@@ -293,13 +296,13 @@ class Counter(IOComponent):
         self.call_later(1, cb)
 
 
-class Printer(Component):
+class Printer(IOComponent):
     """ Sample implementation of Component which simply prints numbers received
     from Counter.
     """
 
     def __init__(self):
-        Component.__init__(self)
+        IOComponent.__init__(self)
 
         self.add_handler("print", self.on_print)
 
