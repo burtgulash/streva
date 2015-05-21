@@ -13,31 +13,6 @@ import queue
 
 
 
-
-class Stats:
-
-    def __init__(self):
-        self.operation_stats = {}
-        self.queue_size = 0
-
-    def register_operation_stats(self, operation_name):
-        self.operation_stats[operation_name] = Stats.OperationStats()
-
-    def update_running_stats(self, operation_name, running_time, number_of_runs):
-        op_stats = self.operation_stats[operation_name]
-        op_stats.runs += number_of_runs
-        op_stats.total_time += running_time
-
-    # TODO dump stats into serialized form
-
-    class OperationStats:
-
-        def __init__(self):
-            self.runs = 0
-            self.total_time = 0
-
-
-
 class Component:
     """ Component class is an implementation of scheduled event loop.
 
@@ -54,7 +29,7 @@ class Component:
         # Scheduling
         self._tasks = queue.Queue()
         # To avoid busy waiting, wait this number of seconds if there is no
-        # task or timeout to process in an iteration
+        # task or timeout to process in an iteration.
         self._WAIT_ON_EMPTY = .5
         self._timeouts = []
         self._cancellations = 0
@@ -62,10 +37,6 @@ class Component:
         # Message routing
         self._ports = {}
         self._operations = {}
-
-        # Monitoring
-        self.stats = Stats()
-        self.stats.register_operation_stats("timeouts")
 
         # Running
         self._thread = None
@@ -79,7 +50,6 @@ class Component:
 
     def add_handler(self, operation_name, handler):
         self._operations[operation_name] = handler
-        self.stats.register_operation_stats(operation_name)
 
     def connect(self, port_name, to_component, to_operation_name):
         port = self._ports[port_name]
@@ -120,9 +90,6 @@ class Component:
         fn = self._operations[operation_name]
         fn(message)
 
-        running_time = time.time() - self.now
-        self.stats.update_running_stats(operation_name, running_time, 1)
-
     def _process_timeouts(self):
         due_timeouts = []
         while self._timeouts:
@@ -145,9 +112,6 @@ class Component:
             if timeout.callback is not None:
                 timeout.callback()
 
-        running_time = time.time() - self.now
-        self.stats.update_running_stats("timeouts", running_time, no_timeouts)
-
 
     def call_later(self, delay, callback, *args, **kwargs):
         return self.call_at(time.time() + delay, callback, *args, **kwargs)
@@ -161,25 +125,28 @@ class Component:
         timeout.callback = None
         self._cancellations += 1
 
+    def _loop_iteration(self):
+        self.now = time.time()
+
+        time_to_nearest = self._WAIT_ON_EMPTY
+        if self._timeouts:
+            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+        # This is where all the action happens.
+        has_timeouted = self._process_events(time_to_nearest)
+
+        if self._timeouts:
+            self._process_timeouts()
+
+        self.on_after_task()
+
+
     def _run(self):
         self.on_start()
 
         try:
             while self._should_run:
-                self.now = time.time()
-
-                time_to_nearest = self._WAIT_ON_EMPTY
-                if self._timeouts:
-                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
-
-                # This is where all the action happens.
-                has_timeouted = self._process_events(time_to_nearest)
-
-                if self._timeouts:
-                    self._process_timeouts()
-
-                self.on_after_task()
-                self.stats.queue_size = self._tasks.qsize()
+                self._loop_iteration()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")
@@ -254,8 +221,8 @@ class IOComponent(Component):
     def send(self, operation_name, message):
         # Put task message into queue
         Component.send(self, operation_name, message)
-        # Signal about this event to epoll by sending a single byte to it
-        os.write(self._operations_pipe[1], b'\0')
+        # Signal about this event to epoll by sending a random single byte to it
+        os.write(self._operations_pipe[1], b'X')
 
     def _process_events(self, timeout):
         events = self._poll.poll(timeout)
@@ -276,6 +243,66 @@ class IOComponent(Component):
 
     def process_poll_event(self, fd, event):
         raise NotImplementedError("process_poll_event must be overriden")
+
+
+
+class Stats:
+
+    def __init__(self):
+        self.operation_stats = {}
+        self.queue_size = 0
+
+    def register_operation_stats(self, operation_name):
+        self.operation_stats[operation_name] = Stats.OperationStats()
+
+    def update_running_stats(self, operation_name, running_time, number_of_runs):
+        op_stats = self.operation_stats[operation_name]
+        op_stats.runs += number_of_runs
+        op_stats.total_time += running_time
+
+    # TODO dump stats into serialized form
+
+    class OperationStats:
+
+        def __init__(self):
+            self.runs = 0
+            self.total_time = 0
+
+
+
+class MonitoredComponent(Component):
+    """ Monitored component collects runtime data of a component and makes it
+    available in its 'stats' field.
+    """
+
+    def __init__(self):
+        Component.__init__(self)
+
+        # Monitoring
+        self.stats = Stats()
+        self.stats.register_operation_stats("timeouts")
+
+    def add_handler(self, operation_name, handler):
+        Component.add_handler(self, operation_name, handler)
+
+        self.stats.register_operation_stats(operation_name)
+
+    def _process_operation(self, operation_name, message):
+        Component._process_operation(self, operation_name, message)
+
+        running_time = time.time() - self.now
+        self.stats.update_running_stats(operation_name, running_time, 1)
+
+    def _process_timeouts(self):
+        Component._process_timeouts(self)
+
+        running_time = time.time() - self.now
+        self.stats.update_running_stats("timeouts", running_time, no_timeouts)
+
+    def _loop_iteration(self):
+        Component._loop_iteration(self)
+
+        self.stats.queue_size = self._tasks.qsize()
 
 
 
@@ -350,7 +377,7 @@ class Printer(IOComponent):
         self.out_port.send(count)
 
 
-class SquaredPrinter(Component):
+class SquaredPrinter(MonitoredComponent):
     """ Square a number and print it. """
 
     def __init__(self):
