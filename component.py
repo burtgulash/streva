@@ -18,11 +18,22 @@ class Stats:
         self.operation_stats = {}
         self.queue_size = 0
 
+    def register_operation_stats(self, operation_name):
+        self.operation_stats[operation_name] = Stats.OperationStats()
+
+    def update_running_stats(self, operation_name, running_time, number_of_runs):
+        op_stats = self.operation_stats[operation_name]
+        op_stats.runs += number_of_runs
+        op_stats.total_time += running_time
+
+    # TODO dump stats into serialized form
+
     class OperationStats:
 
         def __init__(self):
             self.runs = 0
             self.total_time = 0
+
 
 
 class Component:
@@ -40,6 +51,7 @@ class Component:
 
         # Monitoring
         self.stats = Stats()
+        self.stats.register_operation_stats("timeouts")
 
         # Running
         self._thread = None
@@ -53,7 +65,7 @@ class Component:
 
     def add_handler(self, operation_name, handler):
         self._operations[operation_name] = handler
-        self.stats.operation_stats[operation_name] = Stats.OperationStats()
+        self.stats.register_operation_stats(operation_name)
 
     def connect_port(self, port_name, target_component, operation_name):
         """ Wires channels between components.
@@ -79,19 +91,6 @@ class Component:
     def is_dead(self):
         return self._is_dead
 
-    def _process_operation(self, operation_name, message):
-        fn = self._operations[operation_name]
-
-        start_time = time.time()
-        fn(message)
-        running_time = time.time() - start_time
-
-        op_stats = self.stats.operation_stats[operation_name]
-        op_stats.runs += 1
-        op_stats.total_time += running_time
-
-
-
     def on_start(self):
         """ Override """
         pass
@@ -103,6 +102,13 @@ class Component:
     def on_after_task(self):
         """ Override """
         pass
+
+    def _process_operation(self, operation_name, message):
+        fn = self._operations[operation_name]
+        fn(message)
+
+        running_time = time.time() - self.now
+        self.stats.update_running_stats(operation_name, running_time, 1)
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -121,9 +127,14 @@ class Component:
                                   if x.callback is not None]
                 heapq.heapify(self._timeouts)
 
+        no_timeouts = len(due_timeouts)
         for timeout in due_timeouts:
             if timeout.callback is not None:
                 timeout.callback()
+
+        running_time = time.time() - self.now
+        self.stats.update_running_stats("timeouts", running_time, no_timeouts)
+
 
     def call_later(self, delay, callback, *args, **kwargs):
         return self.call_at(time.time() + delay, callback, *args, **kwargs)
@@ -137,26 +148,29 @@ class Component:
         timeout.callback = None
         self._cancellations += 1
 
+    def _loop_iteration(self):
+        self.now = time.time()
+
+        time_to_nearest = .5 # avoid busy waiting by making default wait non zero
+        if self._timeouts:
+            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+        try:
+            operation_name, message = self._tasks.get(timeout=time_to_nearest)
+        except queue.Empty:
+            self._process_timeouts()
+        else:
+            self._process_operation(operation_name, message)
+
+        self.on_after_task()
+        self.stats.queue_size = self._tasks.qsize()
+
     def _run(self):
         self.on_start()
 
         try:
             while self._should_run:
-                self.now = time.time()
-
-                time_to_nearest = .5 # avoid busy waiting by making default wait non zero
-                if self._timeouts:
-                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
-
-                try:
-                    operation_name, message = self._tasks.get(timeout=time_to_nearest)
-                except queue.Empty:
-                    self._process_timeouts()
-                else:
-                    self._process_operation(operation_name, message)
-
-                self.on_after_task()
-                self.stats.queue_size = self._tasks.qsize()
+                self._loop_iteration()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")
