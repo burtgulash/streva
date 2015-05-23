@@ -27,6 +27,7 @@ class Counter(Component):
             self.count += 1
 
             self.call_later(1, cb)
+            print(self._reactor.stats)
 
         self.call_later(1, cb)
 
@@ -64,7 +65,7 @@ class SquaredPrinter(Component):
 
 def test():
     # Define engines
-    reactor = Reactor()
+    reactor = MonitoredReactor()
     io_reactor = IOReactor()
 
     # Define logical components

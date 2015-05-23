@@ -2,11 +2,14 @@
 
 import heapq
 import functools
+import logging
 import os
 import select
 import threading
 import time
 import queue
+
+from .stats import Stats
 
 
 class Reactor:
@@ -88,10 +91,12 @@ class Reactor:
                                   if x.callback is not None]
                 heapq.heapify(self._timeouts)
 
-        no_timeouts = len(due_timeouts)
+        no_processed = len(due_timeouts)
         for timeout in due_timeouts:
             if timeout.callback is not None:
                 timeout.callback()
+
+        return no_processed
 
 
     def call_later(self, delay, callback, *args, **kwargs):
@@ -176,8 +181,9 @@ class IOReactor(Reactor):
         # Epoll object
         self._poll = select.epoll()
 
-        # Register file descriptor for operations. We need to redirect messages
-        # sent to this component's operations to poll through Unix pipe.
+        # Register file descriptor for internal events. We need to redirect
+        # messages sent to this component's operations to poll through Unix
+        # pipe.
         self._inside_events_pipe = os.pipe()
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
@@ -195,7 +201,7 @@ class IOReactor(Reactor):
 
         for fd, event in events:
             if fd == self._inside_events_pipe[0]:
-                # Consume the '\0' byte sent by 'send' method and process the operation
+                # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
                 event_name, message = self._tasks.get_nowait()
                 self._process_event(event_name, message)
@@ -226,17 +232,17 @@ class MonitoredReactor(Reactor):
 
         self.stats.register_operation_stats(operation_name)
 
-    def _process_operation(self, operation_name, message):
-        Reactor._process_operation(self, operation_name, message)
+    def _process_event(self, operation_name, message):
+        Reactor._process_event(self, operation_name, message)
 
         running_time = time.time() - self.now
         self.stats.update_running_stats(operation_name, running_time, 1)
 
     def _process_timeouts(self):
-        Reactor._process_timeouts(self)
+        no_processed = Reactor._process_timeouts(self)
 
         running_time = time.time() - self.now
-        self.stats.update_running_stats("timeouts", running_time, no_timeouts)
+        self.stats.update_running_stats("timeouts", running_time, no_processed)
 
     def _loop_iteration(self):
         Reactor._loop_iteration(self)

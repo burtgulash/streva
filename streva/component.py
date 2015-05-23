@@ -56,27 +56,3 @@ class Component:
             for target_component, event_name in self._targets:
                 target_component.send(event_name, message)
 
-
-
-class Stats:
-
-    def __init__(self):
-        self.operation_stats = {}
-        self.queue_size = 0
-
-    def register_operation_stats(self, operation_name):
-        self.operation_stats[operation_name] = Stats.OperationStats()
-
-    def update_running_stats(self, operation_name, running_time, number_of_runs):
-        op_stats = self.operation_stats[operation_name]
-        op_stats.runs += number_of_runs
-        op_stats.total_time += running_time
-
-    # TODO dump stats into serialized form
-
-    class OperationStats:
-
-        def __init__(self):
-            self.runs = 0
-            self.total_time = 0
-
