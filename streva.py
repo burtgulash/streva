@@ -13,6 +13,12 @@ import queue
 
 
 class Reactor:
+    """ Reactor class is an implementation of scheduled event loop.
+
+    A reactor can be sent messages to, which are then in turn handled by
+    component's handlers. Sleeping on the thread is implemented by timeouts,
+    which are callbacks delayed on the reactor's scheduler calendar.
+    """
 
     def __init__(self):
 
@@ -161,12 +167,53 @@ class Reactor:
             return self.deadline <= other.deadline
 
 
-class Component:
-    """ Component class is an implementation of scheduled event loop.
+class IOReactor(Reactor):
+    """ IOReactor is an extension of Reactor, which can accept and send events
+    to outside world through file descriptors. Internal implementation is based
+    on 'select.epoll', therefore it only works on machines supporting epoll.
+    """
 
-    A component can be sent messages to, which are then in turn handled by
-    component's handlers. Sleeping on the thread is implemented by timeouts,
-    which are callbacks delayed on the component's scheduler calendar.
+    def __init__(self):
+        Reactor.__init__(self)
+
+        # Epoll object
+        self._poll = select.epoll()
+
+        # Register file descriptor for operations. We need to redirect messages
+        # sent to this component's operations to poll through Unix pipe.
+        self._inside_events_pipe = os.pipe()
+        self._poll.register(self._inside_events_pipe[0], select.POLLIN)
+
+    def send(self, event_name, message):
+        # Put task message into queue
+        Reactor.send(self, event_name, message)
+        # Signal about this event to epoll by sending a random single byte to it
+        os.write(self._inside_events_pipe[1], b'X')
+
+    def _process_events(self, timeout):
+        events = self._poll.poll(timeout)
+        if not events:
+            # No events -> timeout happened
+            return True
+
+        for fd, event in events:
+            if fd == self._inside_events_pipe[0]:
+                # Consume the '\0' byte sent by 'send' method and process the operation
+                os.read(fd, 1)
+                event_name, message = self._tasks.get_nowait()
+                self._process_event(event_name, message)
+            else:
+                self.process_poll_event(fd, event)
+
+        return False
+
+    def process_poll_event(self, fd, event):
+        raise NotImplementedError("process_poll_event must be overriden")
+
+
+class Component:
+    """ Component is a logical construct sitting upon Reactor, which it uses
+    as its backend.
 
     Components can route outgoing messages through Ports. Port is a publisher
     mechanism, which sends messages to its subscribers.
@@ -222,50 +269,6 @@ class Component:
                 target_component.send(event_name, message)
 
 
-class IOComponent(Component):
-    """ Component which can accept and send events to outside world through
-    file descriptors.  Internal implementation is based on 'select.epoll',
-    therefore it only works on machines supporting epoll.
-    """
-
-    def __init__(self):
-        Component.__init__(self)
-
-        # Epoll object
-        self._poll = select.epoll()
-
-        # Register file descriptor for operations. We need to redirect messages
-        # sent to this component's operations to poll through Unix pipe.
-        self._operations_pipe = os.pipe()
-        self._poll.register(self._operations_pipe[0], select.POLLIN)
-
-    def send(self, operation_name, message):
-        # Put task message into queue
-        Component.send(self, operation_name, message)
-        # Signal about this event to epoll by sending a random single byte to it
-        os.write(self._operations_pipe[1], b'X')
-
-    def _process_events(self, timeout):
-        events = self._poll.poll(timeout)
-        if not events:
-            # No events -> timeout happened
-            return True
-
-        for fd, event in events:
-            if fd == self._operations_pipe[0]:
-                # Consume the '\0' byte sent by 'send' method and process the operation
-                os.read(fd, 1)
-                operation_name, message = self._tasks.get_nowait()
-                self._process_operation(operation_name, message)
-            else:
-                self.process_poll_event(fd, event)
-
-        return False
-
-    def process_poll_event(self, fd, event):
-        raise NotImplementedError("process_poll_event must be overriden")
-
-
 
 class Stats:
 
@@ -291,37 +294,37 @@ class Stats:
 
 
 
-class MonitoredComponent(Component):
-    """ Monitored component collects runtime data of a component and makes it
+class MonitoredReactor(Reactor):
+    """ Monitored reactor collects runtime data of a reactor loop and makes it
     available in its 'stats' field.
     """
 
     def __init__(self):
-        Component.__init__(self)
+        Reactor.__init__(self)
 
         # Monitoring
         self.stats = Stats()
         self.stats.register_operation_stats("timeouts")
 
     def add_handler(self, operation_name, handler):
-        Component.add_handler(self, operation_name, handler)
+        Reactor.add_handler(self, operation_name, handler)
 
         self.stats.register_operation_stats(operation_name)
 
     def _process_operation(self, operation_name, message):
-        Component._process_operation(self, operation_name, message)
+        Reactor._process_operation(self, operation_name, message)
 
         running_time = time.time() - self.now
         self.stats.update_running_stats(operation_name, running_time, 1)
 
     def _process_timeouts(self):
-        Component._process_timeouts(self)
+        Reactor._process_timeouts(self)
 
         running_time = time.time() - self.now
         self.stats.update_running_stats("timeouts", running_time, no_timeouts)
 
     def _loop_iteration(self):
-        Component._loop_iteration(self)
+        Reactor._loop_iteration(self)
 
         self.stats.queue_size = self._tasks.qsize()
 
@@ -330,7 +333,7 @@ class MonitoredComponent(Component):
 class Supervisor:
 
     def __init__(self):
-        self._components = []
+        self._reactors = []
 
         # Register signal handler for stop signals
         def signal_stop_handler(sig, frame):
@@ -340,16 +343,16 @@ class Supervisor:
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(sig, signal_stop_handler)
 
-    def add(self, component):
-        self._components.append(component)
+    def add(self, reactor):
+        self._reactors.append(reactor)
 
     def start_all(self):
-        for component in self._components:
-            component.start()
+        for reactor in self._reactors:
+            reactor.start()
 
     def stop_all(self):
-        for component in self._components:
-            component.stop()
+        for reactor in self._reactors:
+            reactor.stop()
 
 
 
@@ -400,11 +403,11 @@ class Printer(Component):
         self.out_port.send(count)
 
 
-class SquaredPrinter(MonitoredComponent):
+class SquaredPrinter(Component):
     """ Square a number and print it. """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, reactor=None):
+        super().__init__(reactor)
 
         self.add_handler("print", self.on_print)
 
@@ -415,15 +418,19 @@ class SquaredPrinter(MonitoredComponent):
 
 
 def test():
-    r = Reactor()
-    counter = Counter(1, reactor=r)
-    printer = Printer(reactor=r)
-    # sq_printer = SquaredPrinter()
+    # Define engines
+    reactor = Reactor()
+    io_reactor = IOReactor()
+
+    # Define logical components
+    counter = Counter(1, reactor=reactor)
+    printer = Printer(reactor=reactor)
+    sq_printer = SquaredPrinter(reactor=reactor)
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'
     counter.connect("count", printer, "print")
-    # printer.connect("out", sq_printer, "print")
+    printer.connect("out", sq_printer, "print")
 
     # Set up logging
     logging.basicConfig(format="%(levelname)s -- %(message)s",
@@ -431,13 +438,10 @@ def test():
 
     # Register all components within supervisor and start them
     supervisor = Supervisor()
-    supervisor.add(counter)
-    supervisor.add(printer)
-    # supervisor.add(sq_printer)
+    supervisor.add(reactor)
+    supervisor.add(io_reactor)
 
-    # supervisor.start_all()
-
-    r.start()
+    supervisor.start_all()
 
 
 if __name__ == "__main__":
