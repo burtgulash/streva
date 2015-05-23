@@ -25,21 +25,17 @@ class Reactor:
         self._cancellations = 0
 
         # Handlers
-        self._operations = {}
-        self._notifications = {}
+        self._handlers = {}
 
         # Running
         self._thread = None
         self._is_dead = False
         self._should_run = True
 
-    def add_handler(self, operation_name, handler):
-        self._operations[operation_name] = handler
-
-    def send(self, operation_name, message):
-        """ Send message to this component's operation.
+    def send(self, event_name, message):
+        """ Send message to this reactor registered by event_name.
         """
-        self._tasks.put((operation_name, message))
+        self._tasks.put((event_name, message))
 
     def stop(self):
         self._should_run = False
@@ -53,27 +49,23 @@ class Reactor:
         return self._is_dead
 
 
-    def add_observer(self, event_name, callback):
-        if event_name not in self._notifications:
-            self._notifications[event_name] = []
-        self._notifications[event_name].append(callback)
+    def add_handler(self, event_name, callback):
+        if event_name not in self._handlers:
+            self._handlers[event_name] = []
+        self._handlers[event_name].append(callback)
 
-    def del_observer(self, event_name, callback):
-        if event_name in self._notifications:
+    def del_handler(self, event_name, callback):
+        if event_name in self._handlers:
             without_observer = []
-            for observer in self._notifications[event_name]:
+            for observer in self._handlers[event_name]:
                 if observer != calback:
                     without_observer.append(observer)
-            self._notifications[event_name] = without_observer
+            self._handlers[event_name] = without_observer
 
-    def _process_operation(self, operation_name, message):
-        fn = self._operations[operation_name]
-        fn(message)
-
-    def _notify(self, event_name):
-        if event_name in self._notifications:
-            for observer in self._notifications[event_name]:
-                observer()
+    def _process_event(self, event_name, message):
+        if event_name in self._handlers:
+            for handler in self._handlers[event_name]:
+                handler(message)
 
 
     def _process_timeouts(self):
@@ -126,7 +118,7 @@ class Reactor:
 
 
     def _run(self):
-        self._notify("start")
+        self.send("start", None)
 
         try:
             while self._should_run:
@@ -136,7 +128,7 @@ class Reactor:
             logging.exception("Component failed on exception!")
 
         self._is_dead = True
-        self._notify("end")
+        self.send("end", None)
 
     def _process_events(self, timeout):
         """ Process events from component's queue.
@@ -144,13 +136,13 @@ class Reactor:
         """
 
         try:
-            operation_name, message = self._tasks.get(timeout=timeout)
+            handler_name, message = self._tasks.get(timeout=timeout)
         except queue.Empty:
             # Timeout obtained means that a timeout event came before an event
             # from the queue
             return True
         else:
-            self._process_operation(operation_name, message)
+            self._process_event(handler_name, message)
             return False
 
 
@@ -189,30 +181,29 @@ class Component:
         self._ports[name] = port
         return port
 
-    def connect(self, port_name, to_component, to_operation_name):
+    def connect(self, port_name, to_component, to_event_name):
         port = self._ports[port_name]
-        port._targets.append((to_component, to_operation_name))
+        port._targets.append((to_component, to_event_name))
 
-    def subscribe(self, operation_name, source_component, source_port_name):
-        source_component.connect(source_port_name, self, operation_name)
+    def subscribe(self, event_name, source_component, source_port_name):
+        source_component.connect(source_port_name, self, event_name)
 
-    def send(self, operation_name, message):
-        self._reactor.send(self._unique_operation_id(operation_name), message)
+    def send(self, event_name, message):
+        self._reactor.send(self._unique_event_id(event_name), message)
 
-    def add_handler(self, operation_name, handler):
-        self._reactor.add_handler(self._unique_operation_id(operation_name), handler)
+    def add_handler(self, event_name, handler, reactor_event=False):
+        if not reactor_event:
+            event_name = self._unique_event_id(event_name)
+        self._reactor.add_handler(event_name, handler)
 
     def call_later(self, delay, callback, *args, **kwargs):
         self._reactor.call_later(delay, callback, *args, **kwargs)
 
-    def add_observer(self, event_name, callback):
-        self._reactor.add_observer(event_name, callback)
-
-    def _unique_operation_id(self, operation_name):
-        """ Make operation_name unique by combining unique element of this
-        component with operation_name 
+    def _unique_event_id(self, event_name):
+        """ Make event_name unique by combining unique element of this
+        component with event_name. 
         """
-        return str(id(self)) + operation_name
+        return str(id(self)) + event_name
 
 
     class _Port:
@@ -227,8 +218,8 @@ class Component:
         def send(self, message):
             """ Send message to all connected components through this pubsub port.
             """
-            for target_component, operation_name in self._targets:
-                target_component.send(operation_name, message)
+            for target_component, event_name in self._targets:
+                target_component.send(event_name, message)
 
 
 class IOComponent(Component):
@@ -378,11 +369,11 @@ class Counter(Component):
         super().__init__(reactor)
 
         self.out_port = self.make_port("count")
+        self.add_handler("start", self.on_start, reactor_event=True)
+
         self.count = count_from
 
-        self.add_observer("start", self.on_start)
-
-    def on_start(self):
+    def on_start(self, message):
         def cb():
             self.out_port.send(self.count)
             self.count += 1
