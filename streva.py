@@ -12,17 +12,7 @@ import time
 import queue
 
 
-
-class Component:
-    """ Component class is an implementation of scheduled event loop.
-
-    A component can be sent messages to, which are then in turn handled by
-    component's handlers. Sleeping on the thread is implemented by timeouts,
-    which are callbacks delayed on the component's scheduler calendar.
-
-    Components can route outgoing messages through Ports. Port is a publisher
-    mechanism, which sends messages to its subscribers.
-    """
+class Reactor:
 
     def __init__(self):
 
@@ -34,29 +24,17 @@ class Component:
         self._timeouts = []
         self._cancellations = 0
 
-        # Message routing
-        self._ports = {}
+        # Handlers
         self._operations = {}
+        self._notifications = {}
 
         # Running
         self._thread = None
         self._is_dead = False
         self._should_run = True
 
-    def make_port(self, name):
-        port = self._Port(name)
-        self._ports[name] = port
-        return port
-
     def add_handler(self, operation_name, handler):
         self._operations[operation_name] = handler
-
-    def connect(self, port_name, to_component, to_operation_name):
-        port = self._ports[port_name]
-        port._targets.append((to_component, to_operation_name))
-
-    def subscribe(self, operation_name, source_component, source_port_name):
-        source_component.connect(source_port_name, self, operation_name)
 
     def send(self, operation_name, message):
         """ Send message to this component's operation.
@@ -74,21 +52,29 @@ class Component:
     def is_dead(self):
         return self._is_dead
 
-    def on_start(self):
-        """ Override """
-        pass
 
-    def on_end(self):
-        """ Override """
-        pass
+    def add_observer(self, event_name, callback):
+        if event_name not in self._notifications:
+            self._notifications[event_name] = []
+        self._notifications[event_name].append(callback)
 
-    def on_after_task(self):
-        """ Override """
-        pass
+    def del_observer(self, event_name, callback):
+        if event_name in self._notifications:
+            without_observer = []
+            for observer in self._notifications[event_name]:
+                if observer != calback:
+                    without_observer.append(observer)
+            self._notifications[event_name] = without_observer
 
     def _process_operation(self, operation_name, message):
         fn = self._operations[operation_name]
         fn(message)
+
+    def _notify(self, event_name):
+        if event_name in self._notifications:
+            for observer in self._notifications[event_name]:
+                observer()
+
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -138,11 +124,9 @@ class Component:
         if self._timeouts:
             self._process_timeouts()
 
-        self.on_after_task()
-
 
     def _run(self):
-        self.on_start()
+        self._notify("start")
 
         try:
             while self._should_run:
@@ -152,7 +136,7 @@ class Component:
             logging.exception("Component failed on exception!")
 
         self._is_dead = True
-        self.on_end()
+        self._notify("end")
 
     def _process_events(self, timeout):
         """ Process events from component's queue.
@@ -183,6 +167,52 @@ class Component:
 
         def __le__(self, other):
             return self.deadline <= other.deadline
+
+
+class Component:
+    """ Component class is an implementation of scheduled event loop.
+
+    A component can be sent messages to, which are then in turn handled by
+    component's handlers. Sleeping on the thread is implemented by timeouts,
+    which are callbacks delayed on the component's scheduler calendar.
+
+    Components can route outgoing messages through Ports. Port is a publisher
+    mechanism, which sends messages to its subscribers.
+    """
+
+    def __init__(self, reactor):
+        self._reactor = reactor
+        self._ports = {}
+
+    def make_port(self, name):
+        port = self._Port(name)
+        self._ports[name] = port
+        return port
+
+    def connect(self, port_name, to_component, to_operation_name):
+        port = self._ports[port_name]
+        port._targets.append((to_component, to_operation_name))
+
+    def subscribe(self, operation_name, source_component, source_port_name):
+        source_component.connect(source_port_name, self, operation_name)
+
+    def send(self, operation_name, message):
+        self._reactor.send(self._unique_operation_id(operation_name), message)
+
+    def add_handler(self, operation_name, handler):
+        self._reactor.add_handler(self._unique_operation_id(operation_name), handler)
+
+    def call_later(self, delay, callback, *args, **kwargs):
+        self._reactor.call_later(delay, callback, *args, **kwargs)
+
+    def add_observer(self, event_name, callback):
+        self._reactor.add_observer(event_name, callback)
+
+    def _unique_operation_id(self, operation_name):
+        """ Make operation_name unique by combining unique element of this
+        component with operation_name 
+        """
+        return str(id(self)) + operation_name
 
 
     class _Port:
@@ -344,11 +374,13 @@ class Counter(Component):
     in periodic intervals and sends them out for printing.
     """
 
-    def __init__(self, count_from):
-        super().__init__()
+    def __init__(self, count_from, reactor=None):
+        super().__init__(reactor)
 
         self.out_port = self.make_port("count")
         self.count = count_from
+
+        self.add_observer("start", self.on_start)
 
     def on_start(self):
         def cb():
@@ -360,13 +392,13 @@ class Counter(Component):
         self.call_later(1, cb)
 
 
-class Printer(IOComponent):
+class Printer(Component):
     """ Sample implementation of Component which simply prints numbers received
     from Counter.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, reactor=None):
+        super().__init__(reactor)
 
         self.add_handler("print", self.on_print)
         self.out_port = self.make_port("out")
@@ -392,14 +424,15 @@ class SquaredPrinter(MonitoredComponent):
 
 
 def test():
-    counter = Counter(1)
-    printer = Printer()
-    sq_printer = SquaredPrinter()
+    r = Reactor()
+    counter = Counter(1, reactor=r)
+    printer = Printer(reactor=r)
+    # sq_printer = SquaredPrinter()
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'
     counter.connect("count", printer, "print")
-    printer.connect("out", sq_printer, "print")
+    # printer.connect("out", sq_printer, "print")
 
     # Set up logging
     logging.basicConfig(format="%(levelname)s -- %(message)s",
@@ -409,9 +442,11 @@ def test():
     supervisor = Supervisor()
     supervisor.add(counter)
     supervisor.add(printer)
-    supervisor.add(sq_printer)
+    # supervisor.add(sq_printer)
 
-    supervisor.start_all()
+    # supervisor.start_all()
+
+    r.start()
 
 
 if __name__ == "__main__":
