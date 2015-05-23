@@ -29,15 +29,16 @@ class Stats:
 
 
         strs = []
-        for op, stats in self.operation_stats.items():
-            s = "Statistics for event {}:\n{}".format(op, str(stats))
+        for op, stats in sorted(self.operation_stats.items(), key=lambda s: s[1].total_time):
+            s = "### Statistics for event {}:\n{}".format(op, str(stats))
             strs.append(s)
 
-        strs.append("Grand total statistics:\n{}".format(str(grand_total)))
-        strs.append("Calendar time:    {}".format(time.time() - self.initialized_at))
-        strs.append("CPU time:         {}\n".format(cpu_time))
+        strs.append("## Grand total statistics:")
+        strs.append("Total events processed:    {}".format(grand_total.runs))
+        strs.append("Calendar time [s]:         {:.6f}".format(time.time() - self.initialized_at))
+        strs.append("CPU time      [s]:         {:.6f}".format(grand_total.total_time))
 
-        return "Runtime statistics:\n\n" + "\n".join(strs)
+        return "# Runtime statistics (sorted by total time):\n{}\n\n".format("\n".join(strs))
 
 
     class OperationStats:
@@ -48,9 +49,9 @@ class Stats:
 
         def __str__(self):
             avg = self.total_time / self.runs if self.runs else 0
-            return ("events processed:         {}\n"
-                   "total running time [s]:   {}\n"
-                   "average running time [s]: {}\n".format(self.runs, 
-                                                           self.total_time, 
-                                                           avg))
+            return ("Events processed:          {}\n"
+                    "Total running time   [s]:  {:.6f}\n"
+                    "Average running time [s]:  {:.6f}\n".format(self.runs, 
+                                                                 self.total_time, 
+                                                                 avg))
 

@@ -239,9 +239,10 @@ class MonitoredReactor(Reactor):
         self.stats.update_running_stats(operation_name, running_time, 1)
 
     def _process_timeouts(self):
+        now = time.time()
         no_processed = Reactor._process_timeouts(self)
 
-        running_time = time.time() - self.now
+        running_time = time.time() - now
         self.stats.update_running_stats("timeouts", running_time, no_processed)
 
     def _loop_iteration(self):
