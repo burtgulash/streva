@@ -13,8 +13,8 @@ class Counter(Component):
     in periodic intervals and sends them out for printing.
     """
 
-    def __init__(self, count_from, reactor=None):
-        super().__init__(reactor)
+    def __init__(self, count_from, name=None, reactor=None):
+        super().__init__(reactor, name=name)
 
         self.out_port = self.make_port("count")
         self.add_handler("start", self.on_start, reactor_event=True)
@@ -26,7 +26,7 @@ class Counter(Component):
             self.out_port.send(self.count)
             self.count += 1
 
-            self.call_later(1, cb)
+            self.call_later(.1, cb)
             print(self._reactor.stats)
 
         self.call_later(1, cb)
@@ -37,8 +37,8 @@ class Printer(Component):
     from Counter.
     """
 
-    def __init__(self, reactor=None):
-        super().__init__(reactor)
+    def __init__(self, name=None, reactor=None):
+        super().__init__(reactor, name=name)
 
         self.add_handler("print", self.on_print)
         self.out_port = self.make_port("out")
@@ -52,8 +52,8 @@ class Printer(Component):
 class SquaredPrinter(Component):
     """ Square a number and print it. """
 
-    def __init__(self, reactor=None):
-        super().__init__(reactor)
+    def __init__(self, name=None, reactor=None):
+        super().__init__(reactor, name=name)
 
         self.add_handler("print", self.on_print)
 
@@ -69,9 +69,9 @@ def test():
     io_reactor = IOReactor()
 
     # Define logical components
-    counter = Counter(1, reactor=reactor)
-    printer = Printer(reactor=reactor)
-    sq_printer = SquaredPrinter(reactor=reactor)
+    counter = Counter(1, name="counter", reactor=reactor)
+    printer = Printer(name="printer", reactor=reactor)
+    sq_printer = SquaredPrinter(name="sq_printer", reactor=reactor)
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'

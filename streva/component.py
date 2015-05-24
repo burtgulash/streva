@@ -7,7 +7,9 @@ class Component:
     mechanism, which sends messages to its subscribers.
     """
 
-    def __init__(self, reactor):
+    def __init__(self, reactor, name=None):
+        self.name = name
+
         self._reactor = reactor
         self._ports = {}
 
@@ -38,6 +40,8 @@ class Component:
         """ Make event_name unique by combining unique element of this
         component with event_name. 
         """
+        if self.name:
+            return self.name + "." + event_name
         return str(id(self)) + event_name
 
 
