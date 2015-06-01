@@ -129,25 +129,22 @@ class Reactor:
         else:
             self._process_event(event)
 
-    def _loop_iteration(self):
-        self.now = time.time()
-
-        time_to_nearest = self._WAIT_ON_EMPTY
-        if self._timeouts:
-            time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
-
-        # This is where all the action happens.
-        self._process_events(time_to_nearest)
-
-        if self._timeouts:
-            self._process_timeouts()
-
     def _run(self):
         self.notify("start")
 
         try:
             while self._should_run:
-                self._loop_iteration()
+                self.now = time.time()
+
+                time_to_nearest = self._WAIT_ON_EMPTY
+                if self._timeouts:
+                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+
+                # This is where all the action happens.
+                self._process_events(time_to_nearest)
+
+                if self._timeouts:
+                    self._process_timeouts()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
             logging.exception("Component failed on exception!")

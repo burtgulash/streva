@@ -22,6 +22,13 @@ class Component:
         self.add_handler("start", self.on_start)
         self.add_handler("end", self.on_end)
 
+    def on_start(self, message):
+        pass
+
+    def on_end(self, message):
+        pass
+
+
     def make_port(self, name):
         port = self._Port(name)
         self._ports[name] = port
@@ -31,6 +38,9 @@ class Component:
         port = self._ports[port_name]
         port._targets.append((to_component, to_event_name))
 
+    def add_handler(self, event_name, handler):
+        self._handlers[event_name] = handler
+
     def send(self, event_name, message):
         handler = self._handlers[event_name]
         self.call(lambda: handler(message))
@@ -38,16 +48,6 @@ class Component:
     def call(self, function, delay=None):
         event = self._reactor.schedule(function, delay=delay)
         self._events_planned[id(event)] = event
-
-
-    def add_handler(self, event_name, handler):
-        self._handlers[event_name] = handler
-
-    def on_start(self, message):
-        pass
-
-    def on_end(self, message):
-        pass
 
 
     class _Port:
