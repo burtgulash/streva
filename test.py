@@ -15,9 +15,7 @@ class Counter(Actor):
 
     def __init__(self, count_from, reactor=None):
         super().__init__(reactor)
-
         self.out_port = self.make_port("count")
-
         self.count = count_from
 
     def on_start(self, message):
@@ -37,7 +35,6 @@ class Printer(Actor):
 
     def __init__(self, reactor=None):
         super().__init__(reactor)
-
         self.add_handler("print", self.on_print)
 
     def on_print(self, count):

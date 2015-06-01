@@ -51,7 +51,7 @@ class Reactor:
     def __init__(self):
 
         # Scheduling
-        self._tasks = queue.Queue()
+        self._queue = queue.Queue()
         # To avoid busy waiting, wait this number of seconds if there is no
         # task or timeout to process in an iteration.
         self._WAIT_ON_EMPTY = .5
@@ -80,22 +80,22 @@ class Reactor:
 
 
     # Lifecycle notifications methods
-    def notify(self, event_name):
+    def notify(self, event_name, message):
         if event_name in self._observers:
-            for observer in self._observers[event_name]:
-                observer.send(event_name, None)
+            for handler in self._observers[event_name]:
+                handler(message)
 
-    def add_observer(self, observer, event_name):
+    def add_observer(self, event_name, handler):
         if event_name not in self._observers:
             self._observers[event_name] = []
-        self._observers[event_name].append(observer)
+        self._observers[event_name].append(handler)
 
-    def del_observer(self, observer, event_name):
+    def del_observer(self, event_name, handler):
         if event_name in self._observers:
             without_observer = []
-            for ob in self._observers[event_name]:
-                if ob != observer:
-                    without_observer.append(ob)
+            for h in self._observers[event_name]:
+                if h != handler:
+                    without_observer.append(h)
             self._observers[event_name] = without_observer
 
 
@@ -107,7 +107,7 @@ class Reactor:
             return timeout
         else:
             event = Event(callback)
-            self._tasks.put(event)
+            self._queue.put(event)
             return event
 
     def remove_event(self, event):
@@ -119,9 +119,11 @@ class Reactor:
 
     def _process_event(self, event):
         event.process()
+        self.notify("event_processed", event)
 
     def _process_timeout(self, timeout):
         timeout.process()
+        self.notify("timeout_processed", timeout)
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -149,7 +151,7 @@ class Reactor:
         """
 
         try:
-            event = self._tasks.get(timeout=timeout)
+            event = self._queue.get(timeout=timeout)
         except queue.Empty:
             # Timeout obtained means that a timeout event came before an event
             # from the queue
@@ -158,7 +160,7 @@ class Reactor:
             self._process_event(event)
 
     def _run(self):
-        self.notify("start")
+        self.notify("start", None)
 
         try:
             while self._should_run:
@@ -178,7 +180,7 @@ class Reactor:
             logging.exception("Component failed on exception!")
 
         self._is_dead = True
-        self.notify("end")
+        self.notify("end", None)
 
 
 class IOReactor(Reactor):
@@ -215,7 +217,7 @@ class IOReactor(Reactor):
             if fd == self._inside_events_pipe[0]:
                 # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
-                event = self._tasks.get_nowait()
+                event = self._queue.get_nowait()
                 self._process_event(event)
             else:
                 self.process_poll_event(fd, event)
