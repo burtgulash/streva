@@ -17,7 +17,6 @@ class Counter(Component):
         super().__init__(reactor, name=name)
 
         self.out_port = self.make_port("count")
-        self.add_handler("start", self.on_start)
 
         self.count = count_from
 
