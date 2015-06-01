@@ -3,7 +3,7 @@ import logging
 import signal
 
 
-class Supervisor:
+class Emperor:
 
     def __init__(self):
         self._reactors = []

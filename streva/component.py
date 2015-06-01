@@ -72,18 +72,52 @@ class Actor:
                 target_actor.send(event_name, message)
 
 
-class SupervisedActor(Actor):
+
+class ErrorContext:
+
+    def __init__(self, actor_name, event_name, message, err):
+        self.actor_name = actor_name or "[actor]"
+        self.event_name = event_name
+        self.message = message
+        self.err = err
+
+    def __str__(self):
+        return "{}.{}  <-  '{}'\n{}".format(self.actor_name, 
+                                        self.event_name, 
+                                        str(self.message)[:30] if self.message else "message", 
+                                        self.err)
+
+
+class Supervisor(Actor):
 
     def __init__(self, reactor):
         Actor.__init__(self, reactor)
+
+        self.add_handler("_error_handler", self.on_error)
+
+    def on_error(self, err_message):
+        assert isinstance(err_message, ErrorContext)
+        raise NotImplementedError("on_error of supervisor must be implemented!")
+
+    def supervise(self, supervised_actor):
+        assert(self is not supervised_actor)
+        supervised_actor.connect("_error_", self, "_error_handler")
+
+
+class SupervisedActor(Actor):
+
+    def __init__(self, reactor, name=None):
+        Actor.__init__(self, reactor)
+        self.name = name
+
         self._error_ = self.make_port("_error_")
 
     def _make_safe_callback(self, callback, event_name, message):
         def safe_cb():
             try:
                 callback()
-            except ValueError as err:
-                error_message = self.ErrorContext(event_name, message, err)
+            except Exception as err:
+                error_message = ErrorContext(self.name, event_name, message, err)
                 self._error_.send(error_message)
 
         return safe_cb
@@ -97,11 +131,4 @@ class SupervisedActor(Actor):
         cb = self._make_safe_callback(callback, "timeout", None)
         self._schedule(cb, delay=delay)
 
-
-    class ErrorContext:
-
-        def __init__(self, event_name, message, err):
-            self.event_name = event_name
-            self.message = message
-            self.err = err
-
+    

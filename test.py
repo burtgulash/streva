@@ -30,7 +30,7 @@ class Counter(Actor):
         self.add_timeout(cb, .1)
 
 
-class Printer(SupervisedActor):
+class Printer(Actor):
     """ Sample implementation of Actor which simply prints numbers received
     from Counter.
     """
@@ -39,12 +39,10 @@ class Printer(SupervisedActor):
         super().__init__(reactor)
 
         self.add_handler("print", self.on_print)
-        self.out_port = self.make_port("out")
 
     def on_print(self, count):
         logging.info("printing " + str(count))
         print("Count is:", count)
-        self.out_port.send(count)
 
 
 def test():
@@ -60,12 +58,13 @@ def test():
     # eg. subscribe 'printer.print' to 'counter.count'
     counter.connect("count", printer, "print")
 
+
     # Set up logging
     logging.basicConfig(format="%(levelname)s -- %(message)s",
                         level=logging.INFO)
 
     # Register all components within supervisor and start them
-    supervisor = Supervisor()
+    supervisor = Emperor()
     supervisor.add(reactor)
     supervisor.add(io_reactor)
 
