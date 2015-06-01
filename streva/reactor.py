@@ -31,17 +31,21 @@ class Reactor:
         self._cancellations = 0
 
         # Handlers
-        self._handlers = {}
+        self._observers = set()
 
         # Running
         self._thread = None
         self._is_dead = False
         self._should_run = True
 
-    def send(self, event_name, message):
+    def schedule(self, event_name, callback, message):
         """ Send message to this reactor registered by event_name.
         """
-        self._tasks.put((event_name, message))
+        ev = Event(event_name, callback, message)
+        self._tasks.put(ev)
+
+    def remove_event(self, event):
+        event.callback = None
 
     def stop(self):
         self._should_run = False
@@ -54,25 +58,28 @@ class Reactor:
     def is_dead(self):
         return self._is_dead
 
+    def notify(self, event_name):
+        if self._observers[event_name]:
+            for observer in self._observers[event_name]:
+                observer.send(None)
 
-    def add_handler(self, event_name, callback):
-        if event_name not in self._handlers:
-            self._handlers[event_name] = []
-        self._handlers[event_name].append(callback)
 
-    def del_handler(self, event_name, callback):
-        if event_name in self._handlers:
+    def add_observer(self, observer, event_name):
+        if event_name not in self._observers:
+            self._observers[event_name] = []
+        self._observers[event_name].append(observer)
+
+    def del_observer(self, observer, event_name):
+        if event_name in self._observers:
             without_observer = []
-            for observer in self._handlers[event_name]:
-                if observer != calback:
-                    without_observer.append(observer)
-            self._handlers[event_name] = without_observer
+            for ob in self._observers[event_name]:
+                if ob != observer:
+                    without_observer.append(ob)
+            self._observers[event_name] = without_observer
 
-    def _process_event(self, event_name, message):
-        if event_name in self._handlers:
-            for handler in self._handlers[event_name]:
-                handler(message)
 
+    def _process_event(self, event):
+        event.callback(event.message)
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -119,14 +126,14 @@ class Reactor:
             time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
 
         # This is where all the action happens.
-        has_timeouted = self._process_events(time_to_nearest)
+        self._process_events(time_to_nearest)
 
         if self._timeouts:
             self._process_timeouts()
 
 
     def _run(self):
-        self.send("start", None)
+        self.notify("start")
 
         try:
             while self._should_run:
@@ -136,7 +143,7 @@ class Reactor:
             logging.exception("Component failed on exception!")
 
         self._is_dead = True
-        self.send("end", None)
+        self.notify("end")
 
     def _process_events(self, timeout):
         """ Process events from component's queue.
@@ -144,23 +151,31 @@ class Reactor:
         """
 
         try:
-            handler_name, message = self._tasks.get(timeout=timeout)
+            event = self._tasks.get(timeout=timeout)
         except queue.Empty:
             # Timeout obtained means that a timeout event came before an event
             # from the queue
-            return True
+            pass
         else:
-            self._process_event(handler_name, message)
-            return False
+            self._process_event(event)
 
 
-    class _Timeout:
+    class Event:
+
+        __slots__ = ["callback", "message"]
+
+        def __init__(self, callback, message):
+            self.callback = callback
+            self.message = message
+
+
+    class _Timeout(self.Event):
 
         __slots__ = ["deadline", "callback"]
 
         def __init__(self, deadline, callback):
-            self.deadline = deadline
             self.callback = callback
+            self.deadline = deadline
 
         def __lt__(self, other):
             return self.deadline < other.deadline
@@ -187,9 +202,9 @@ class IOReactor(Reactor):
         self._inside_events_pipe = os.pipe()
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
-    def send(self, event_name, message):
+    def schedule(self, event_name, callback, message):
         # Put task message into queue
-        Reactor.send(self, event_name, message)
+        Reactor.schedule(self, event_name, callback, message)
         # Signal about this event to epoll by sending a random single byte to it
         os.write(self._inside_events_pipe[1], b'X')
 
@@ -197,18 +212,17 @@ class IOReactor(Reactor):
         events = self._poll.poll(timeout)
         if not events:
             # No events -> timeout happened
-            return True
+            return
 
         for fd, event in events:
             if fd == self._inside_events_pipe[0]:
                 # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
-                event_name, message = self._tasks.get_nowait()
-                self._process_event(event_name, message)
+                event = self._tasks.get_nowait()
+                self._process_event(event)
             else:
                 self.process_poll_event(fd, event)
 
-        return False
 
     def process_poll_event(self, fd, event):
         raise NotImplementedError("process_poll_event must be overriden")

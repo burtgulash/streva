@@ -36,6 +36,16 @@ class Component:
     def call_later(self, delay, callback, *args, **kwargs):
         self._reactor.call_later(delay, callback, *args, **kwargs)
 
+    def on_error(self, error, msg):
+        pass
+
+    def process_event(self, callback, msg):
+        if id(callback) in self._planned:
+            try:
+                callback(msg)
+            except Exception as e:
+                self.on_error(e, msg)
+
     def _unique_event_id(self, event_name):
         """ Make event_name unique by combining unique element of this
         component with event_name. 
