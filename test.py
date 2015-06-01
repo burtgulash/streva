@@ -13,8 +13,8 @@ class Counter(Actor):
     in periodic intervals and sends them out for printing.
     """
 
-    def __init__(self, count_from, name=None, reactor=None):
-        super().__init__(reactor, name=name)
+    def __init__(self, count_from, reactor=None):
+        super().__init__(reactor)
 
         self.out_port = self.make_port("count")
 
@@ -25,18 +25,18 @@ class Counter(Actor):
             self.out_port.send(self.count)
             self.count += 1
 
-            self.call(cb, delay=.1)
+            self.add_timeout(cb, .1)
 
-        self.call(cb, delay=.1)
+        self.add_timeout(cb, .1)
 
 
-class Printer(Actor):
+class Printer(SupervisedActor):
     """ Sample implementation of Actor which simply prints numbers received
     from Counter.
     """
 
-    def __init__(self, name=None, reactor=None):
-        super().__init__(reactor, name=name)
+    def __init__(self, reactor=None):
+        super().__init__(reactor)
 
         self.add_handler("print", self.on_print)
         self.out_port = self.make_port("out")
@@ -53,8 +53,8 @@ def test():
     io_reactor = IOReactor()
 
     # Define logical components
-    counter = Counter(1, name="counter", reactor=reactor)
-    printer = Printer(name="printer", reactor=io_reactor)
+    counter = Counter(1, reactor=reactor)
+    printer = Printer(reactor=io_reactor)
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'
