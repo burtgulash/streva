@@ -12,6 +12,34 @@ import queue
 from .stats import Stats
 
 
+
+class Event:
+
+    __slots__ = ["deadline", "callback", "processed", "delay"]
+
+    def __init__(self, callback, delay=None):
+        self.callback = callback
+        self.processed = False
+
+        self.delay = delay
+        if delay is not None:
+            self.deadline = time.time() + delay
+
+    def process(self):
+        if self.callback:
+            self.callback()
+        self.processed = True
+
+    def deactivate(self):
+        self.callback = None
+
+    def __lt__(self, other):
+        return self.deadline < other.deadline
+
+    def __le__(self, other):
+        return self.deadline <= other.deadline
+
+
 class Reactor:
     """ Reactor class is an implementation of scheduled event loop.
 
@@ -74,11 +102,11 @@ class Reactor:
     # Scheduler methods
     def schedule(self, callback, delay=None):
         if delay:
-            timeout = self.Event(callback, delay=delay)
+            timeout = Event(callback, delay=delay)
             heapq.heappush(self._timeouts, timeout)
             return timeout
         else:
-            event = self.Event(callback)
+            event = Event(callback)
             self._tasks.put(event)
             return event
 
@@ -151,31 +179,6 @@ class Reactor:
 
         self._is_dead = True
         self.notify("end")
-
-
-
-    class Event:
-
-        __slots__ = ["deadline", "callback", "processed", "delay"]
-
-        def __init__(self, callback, delay=None):
-            self.callback = callback
-            self.processed = False
-
-            self.delay = delay
-            if delay is not None:
-                self.deadline = time.time() + delay
-
-        def process(self):
-            if self.callback:
-                self.callback()
-            self.processed = True
-
-        def __lt__(self, other):
-            return self.deadline < other.deadline
-
-        def __le__(self, other):
-            return self.deadline <= other.deadline
 
 
 class IOReactor(Reactor):

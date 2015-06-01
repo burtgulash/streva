@@ -3,7 +3,7 @@
 import logging
 
 from streva.reactor import *
-from streva.component import *
+from streva.actor import *
 from streva.supervisor import *
 
 #
