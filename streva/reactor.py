@@ -199,9 +199,9 @@ class IOReactor(Reactor):
         self._inside_events_pipe = os.pipe()
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
-    def schedule(self, event_name, callback, message):
+    def schedule(self, callback, delay=None):
         # Put task message into queue
-        Reactor.schedule(self, event_name, callback, message)
+        Reactor.schedule(self, callback, delay=delay)
         # Signal about this event to epoll by sending a random single byte to it
         os.write(self._inside_events_pipe[1], b'X')
 

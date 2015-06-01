@@ -47,20 +47,6 @@ class Printer(Component):
         self.out_port.send(count)
 
 
-class SquaredPrinter(Component):
-    """ Square a number and print it. """
-
-    def __init__(self, name=None, reactor=None):
-        super().__init__(reactor, name=name)
-
-        self.add_handler("print", self.on_print)
-
-    def on_print(self, count):
-        count = count * count
-        logging.info("square printing " + str(count))
-        print("Count is:", count)
-
-
 def test():
     # Define engines
     reactor = Reactor()
@@ -68,13 +54,11 @@ def test():
 
     # Define logical components
     counter = Counter(1, name="counter", reactor=reactor)
-    printer = Printer(name="printer", reactor=reactor)
-    sq_printer = SquaredPrinter(name="sq_printer", reactor=reactor)
+    printer = Printer(name="printer", reactor=io_reactor)
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'
     counter.connect("count", printer, "print")
-    printer.connect("out", sq_printer, "print")
 
     # Set up logging
     logging.basicConfig(format="%(levelname)s -- %(message)s",
