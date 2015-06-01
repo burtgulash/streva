@@ -38,21 +38,7 @@ class Reactor:
         self._is_dead = False
         self._should_run = True
 
-    def schedule(self, callback, delay=None):
-        if delay:
-            timeout = self.Event(callback, delay=delay)
-            heapq.heappush(self._timeouts, timeout)
-            return timeout
-        else:
-            event = self.Event(callback)
-            self._tasks.put(event)
-            return event
-
-    def remove_event(self, event):
-        if event.delay is not None:
-            self._cancellations += 1
-        event.callback = None
-
+    # Lifecycle methods
     def stop(self):
         self._should_run = False
         self._thread.join()
@@ -64,11 +50,12 @@ class Reactor:
     def is_dead(self):
         return self._is_dead
 
+
+    # Lifecycle notifications methods
     def notify(self, event_name):
         if event_name in self._observers:
             for observer in self._observers[event_name]:
                 observer.send(event_name, None)
-
 
     def add_observer(self, observer, event_name):
         if event_name not in self._observers:
@@ -84,8 +71,29 @@ class Reactor:
             self._observers[event_name] = without_observer
 
 
+    # Scheduler methods
+    def schedule(self, callback, delay=None):
+        if delay:
+            timeout = self.Event(callback, delay=delay)
+            heapq.heappush(self._timeouts, timeout)
+            return timeout
+        else:
+            event = self.Event(callback)
+            self._tasks.put(event)
+            return event
+
+    def remove_event(self, event):
+        # If event is delayed, ie. is a timeout, than increase timeout
+        # cancellations counter
+        if event.delay is not None:
+            self._cancellations += 1
+        event.callback = None
+
     def _process_event(self, event):
         event.process()
+
+    def _process_timeout(self, timeout):
+        timeout.process()
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -104,11 +112,8 @@ class Reactor:
                                   if x.callback is not None]
                 heapq.heapify(self._timeouts)
 
-        no_processed = len(due_timeouts)
         for timeout in due_timeouts:
-            timeout.process()
-
-        return no_processed
+            self._process_timeout(timeout)
 
     def _process_events(self, timeout):
         """ Process events from component's queue.
@@ -136,7 +141,6 @@ class Reactor:
 
         if self._timeouts:
             self._process_timeouts()
-
 
     def _run(self):
         self.notify("start")
@@ -219,41 +223,4 @@ class IOReactor(Reactor):
 
     def process_poll_event(self, fd, event):
         raise NotImplementedError("process_poll_event must be overriden")
-
-
-
-class MonitoredReactor(Reactor):
-    """ Monitored reactor collects runtime data of a reactor loop and makes it
-    available in its 'stats' field.
-    """
-
-    def __init__(self):
-        Reactor.__init__(self)
-
-        # Monitoring
-        self.stats = Stats()
-        self.stats.register_operation_stats("timeouts")
-
-    def add_handler(self, operation_name, handler):
-        Reactor.add_handler(self, operation_name, handler)
-
-        self.stats.register_operation_stats(operation_name)
-
-    def _process_event(self, operation_name, message):
-        Reactor._process_event(self, operation_name, message)
-
-        running_time = time.time() - self.now
-        self.stats.update_running_stats(operation_name, running_time, 1)
-
-    def _process_timeouts(self):
-        now = time.time()
-        no_processed = Reactor._process_timeouts(self)
-
-        running_time = time.time() - now
-        self.stats.update_running_stats("timeouts", running_time, no_processed)
-
-    def _loop_iteration(self):
-        Reactor._loop_iteration(self)
-
-        self.stats.queue_size = self._tasks.qsize()
 
