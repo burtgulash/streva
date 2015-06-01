@@ -17,7 +17,7 @@ class Counter(Component):
         super().__init__(reactor, name=name)
 
         self.out_port = self.make_port("count")
-        self.add_handler("start", self.on_start, reactor_event=True)
+        self.add_handler("start", self.on_start)
 
         self.count = count_from
 
@@ -26,10 +26,9 @@ class Counter(Component):
             self.out_port.send(self.count)
             self.count += 1
 
-            self.call_later(.1, cb)
-            print(self._reactor.stats)
+            self.call(cb, delay=.1)
 
-        self.call_later(1, cb)
+        self.call(cb, delay=.1)
 
 
 class Printer(Component):
@@ -65,7 +64,7 @@ class SquaredPrinter(Component):
 
 def test():
     # Define engines
-    reactor = MonitoredReactor()
+    reactor = Reactor()
     io_reactor = IOReactor()
 
     # Define logical components

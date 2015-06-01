@@ -12,14 +12,15 @@ class Component:
 
         self._reactor = reactor
 
+        self._events_planned = {}
+        self._handlers = {}
+        self._ports = {}
+
         # Setup reactor's lifecycle observation
         self._reactor.add_observer(self, "start")
         self._reactor.add_observer(self, "end")
-        self._add_handler("start", on_start)
-        self._add_handler("end", on_end)
-
-        self._events_planned = {}
-        self._ports = {}
+        self.add_handler("start", self.on_start)
+        self.add_handler("end", self.on_end)
 
     def make_port(self, name):
         port = self._Port(name)
@@ -30,20 +31,23 @@ class Component:
         port = self._ports[port_name]
         port._targets.append((to_component, to_event_name))
 
-    def send(self, event_name, message, delay=None):
+    def send(self, event_name, message):
         handler = self._handlers[event_name]
+        self.call(lambda: handler(message))
 
-        event = self._reactor.schedule(lambda: handler(message), delay=delay)
-        self._events_planned.add(event)
+    def call(self, function, delay=None):
+        event = self._reactor.schedule(function, delay=delay)
+        self._events_planned[id(event)] = event
+
 
     def add_handler(self, event_name, handler):
         self._handlers[event_name] = handler
 
     def on_start(self, message):
-        raise NotImplementedError
+        pass
 
     def on_end(self, message):
-        raise NotImplementedError
+        pass
 
 
     class _Port:

@@ -40,7 +40,7 @@ class Reactor:
 
     def schedule(self, callback, delay=None):
         if delay:
-            timeout = self.Event(callback, deadline=(time.time() + delay))
+            timeout = self.Event(callback, delay=delay)
             heapq.heappush(self._timeouts, timeout)
             return timeout
         else:
@@ -49,6 +49,8 @@ class Reactor:
             return event
 
     def remove_event(self, event):
+        if event.delay is not None:
+            self._cancellations += 1
         event.callback = None
 
     def stop(self):
@@ -63,7 +65,7 @@ class Reactor:
         return self._is_dead
 
     def notify(self, event_name):
-        if self._observers[event_name]:
+        if event_name in self._observers:
             for observer in self._observers[event_name]:
                 observer.send(event_name, None)
 
@@ -83,7 +85,7 @@ class Reactor:
 
 
     def _process_event(self, event):
-        event.callback(event.message)
+        event.process()
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -104,23 +106,23 @@ class Reactor:
 
         no_processed = len(due_timeouts)
         for timeout in due_timeouts:
-            if timeout.callback is not None:
-                timeout.callback()
+            timeout.process()
 
         return no_processed
 
+    def _process_events(self, timeout):
+        """ Process events from component's queue.
+        Return True if timeouted, False otherwise.
+        """
 
-    def call_later(self, delay, callback, *args, **kwargs):
-        return self.call_at(time.time() + delay, callback, *args, **kwargs)
-
-    def call_at(self, deadline, callback, *args, **kwargs):
-        timeout = self.Event(deadline, functools.partial(callback, *args, **kwargs))
-        heapq.heappush(self._timeouts, timeout)
-        return timeout
-
-    def remove_timeout(self, timeout):
-        timeout.callback = None
-        self._cancellations += 1
+        try:
+            event = self._tasks.get(timeout=timeout)
+        except queue.Empty:
+            # Timeout obtained means that a timeout event came before an event
+            # from the queue
+            pass
+        else:
+            self._process_event(event)
 
     def _loop_iteration(self):
         self.now = time.time()
@@ -149,30 +151,19 @@ class Reactor:
         self._is_dead = True
         self.notify("end")
 
-    def _process_events(self, timeout):
-        """ Process events from component's queue.
-        Return True if timeouted, False otherwise.
-        """
-
-        try:
-            event = self._tasks.get(timeout=timeout)
-        except queue.Empty:
-            # Timeout obtained means that a timeout event came before an event
-            # from the queue
-            pass
-        else:
-            self._process_event(event)
-
 
 
     class Event:
 
-        __slots__ = ["deadline", "callback", "processed"]
+        __slots__ = ["deadline", "callback", "processed", "delay"]
 
-        def __init__(self, callback, deadline=None):
+        def __init__(self, callback, delay=None):
             self.callback = callback
-            self.deadline = deadline
             self.processed = False
+
+            self.delay = delay
+            if delay is not None:
+                self.deadline = time.time() + delay
 
         def process(self):
             if self.callback:
