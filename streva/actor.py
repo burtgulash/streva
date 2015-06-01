@@ -12,7 +12,7 @@ class Actor:
 
         self._reactor = reactor
 
-        self._events_planned = {}
+        self._events_planned = set()
         self._handlers = {}
         self._ports = {}
 
@@ -38,8 +38,8 @@ class Actor:
         pass
 
     def on_event_processed(self, event):
-        if id(event) in self._events_planned:
-            del self._events_planned[id(event)]
+        if event in self._events_planned:
+            self._events_planned.remove(event)
 
     def _restart(self, message):
         self.on_end(None)
@@ -47,9 +47,9 @@ class Actor:
         self.on_start(None)
 
     def _flush(self):
-        for event in self._events_planned.values():
+        for event in self._events_planned:
             event.callback.deactivate()
-        self._events_planned = {}
+        self._events_planned = set()
 
 
     # Actor construction and setup methods
@@ -76,7 +76,7 @@ class Actor:
 
     def _schedule(self, callback, delay=None):
         event = self._reactor.schedule(callback, delay=delay)
-        self._events_planned[id(event)] = event
+        self._events_planned.add(event)
 
 
     class _Port:
