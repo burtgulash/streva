@@ -31,18 +31,22 @@ class Reactor:
         self._cancellations = 0
 
         # Handlers
-        self._observers = set()
+        self._observers = {}
 
         # Running
         self._thread = None
         self._is_dead = False
         self._should_run = True
 
-    def schedule(self, event_name, callback, message):
-        """ Send message to this reactor registered by event_name.
-        """
-        ev = Event(event_name, callback, message)
-        self._tasks.put(ev)
+    def schedule(self, callback, delay=None):
+        if delay:
+            timeout = self.Event(callback, deadline=(time.time() + delay))
+            heapq.heappush(self._timeouts, timeout)
+            return timeout
+        else:
+            event = self.Event(callback)
+            self._tasks.put(event)
+            return event
 
     def remove_event(self, event):
         event.callback = None
@@ -61,7 +65,7 @@ class Reactor:
     def notify(self, event_name):
         if self._observers[event_name]:
             for observer in self._observers[event_name]:
-                observer.send(None)
+                observer.send(event_name, None)
 
 
     def add_observer(self, observer, event_name):
@@ -110,7 +114,7 @@ class Reactor:
         return self.call_at(time.time() + delay, callback, *args, **kwargs)
 
     def call_at(self, deadline, callback, *args, **kwargs):
-        timeout = self._Timeout(deadline, functools.partial(callback, *args, **kwargs))
+        timeout = self.Event(deadline, functools.partial(callback, *args, **kwargs))
         heapq.heappush(self._timeouts, timeout)
         return timeout
 
@@ -160,22 +164,20 @@ class Reactor:
             self._process_event(event)
 
 
+
     class Event:
 
-        __slots__ = ["callback", "message"]
+        __slots__ = ["deadline", "callback", "processed"]
 
-        def __init__(self, callback, message):
-            self.callback = callback
-            self.message = message
-
-
-    class _Timeout(self.Event):
-
-        __slots__ = ["deadline", "callback"]
-
-        def __init__(self, deadline, callback):
+        def __init__(self, callback, deadline=None):
             self.callback = callback
             self.deadline = deadline
+            self.processed = False
+
+        def process(self):
+            if self.callback:
+                self.callback()
+            self.processed = True
 
         def __lt__(self, other):
             return self.deadline < other.deadline

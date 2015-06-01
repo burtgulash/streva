@@ -11,6 +11,14 @@ class Component:
         self.name = name
 
         self._reactor = reactor
+
+        # Setup reactor's lifecycle observation
+        self._reactor.add_observer(self, "start")
+        self._reactor.add_observer(self, "end")
+        self._add_handler("start", on_start)
+        self._add_handler("end", on_end)
+
+        self._events_planned = {}
         self._ports = {}
 
     def make_port(self, name):
@@ -22,37 +30,20 @@ class Component:
         port = self._ports[port_name]
         port._targets.append((to_component, to_event_name))
 
-    def subscribe(self, event_name, source_component, source_port_name):
-        source_component.connect(source_port_name, self, event_name)
+    def send(self, event_name, message, delay=None):
+        handler = self._handlers[event_name]
 
-    def send(self, event_name, message):
-        self._reactor.send(self._unique_event_id(event_name), message)
+        event = self._reactor.schedule(lambda: handler(message), delay=delay)
+        self._events_planned.add(event)
 
-    def add_handler(self, event_name, handler, reactor_event=False):
-        if not reactor_event:
-            event_name = self._unique_event_id(event_name)
-        self._reactor.add_handler(event_name, handler)
+    def add_handler(self, event_name, handler):
+        self._handlers[event_name] = handler
 
-    def call_later(self, delay, callback, *args, **kwargs):
-        self._reactor.call_later(delay, callback, *args, **kwargs)
+    def on_start(self, message):
+        raise NotImplementedError
 
-    def on_error(self, error, msg):
-        pass
-
-    def process_event(self, callback, msg):
-        if id(callback) in self._planned:
-            try:
-                callback(msg)
-            except Exception as e:
-                self.on_error(e, msg)
-
-    def _unique_event_id(self, event_name):
-        """ Make event_name unique by combining unique element of this
-        component with event_name. 
-        """
-        if self.name:
-            return self.name + "." + event_name
-        return str(id(self)) + event_name
+    def on_end(self, message):
+        raise NotImplementedError
 
 
     class _Port:
