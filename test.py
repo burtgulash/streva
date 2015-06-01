@@ -8,8 +8,8 @@ from streva.supervisor import *
 
 #
 # Basic test so that this module can be tested immediately
-class Counter(Component):
-    """ Sample implementation of Component which generates sequence of numbers
+class Counter(Actor):
+    """ Sample implementation of Actor which generates sequence of numbers
     in periodic intervals and sends them out for printing.
     """
 
@@ -30,8 +30,8 @@ class Counter(Component):
         self.call(cb, delay=.1)
 
 
-class Printer(Component):
-    """ Sample implementation of Component which simply prints numbers received
+class Printer(Actor):
+    """ Sample implementation of Actor which simply prints numbers received
     from Counter.
     """
 

@@ -1,9 +1,9 @@
 
-class Component:
-    """ Component is a logical construct sitting upon Reactor, which it uses
+class Actor:
+    """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
 
-    Components can route outgoing messages through Ports. Port is a publisher
+    Actors can route outgoing messages through Ports. Port is a publisher
     mechanism, which sends messages to its subscribers.
     """
 
@@ -34,9 +34,9 @@ class Component:
         self._ports[name] = port
         return port
 
-    def connect(self, port_name, to_component, to_event_name):
+    def connect(self, port_name, to_actor, to_event_name):
         port = self._ports[port_name]
-        port._targets.append((to_component, to_event_name))
+        port._targets.append((to_actor, to_event_name))
 
     def add_handler(self, event_name, handler):
         self._handlers[event_name] = handler
@@ -51,7 +51,7 @@ class Component:
 
 
     class _Port:
-        """ Port is a named set of components to all of which an outbound
+        """ Port is a named set of actors to all of which an outbound
         message will be sent through this port. Port implements pubsub routing.
         """
 
@@ -60,8 +60,8 @@ class Component:
             self._targets = []
 
         def send(self, message):
-            """ Send message to all connected components through this pubsub port.
+            """ Send message to all connected actors through this pubsub port.
             """
-            for target_component, event_name in self._targets:
-                target_component.send(event_name, message)
+            for target_actor, event_name in self._targets:
+                target_actor.send(event_name, message)
 
