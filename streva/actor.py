@@ -1,4 +1,19 @@
 
+class ErrorContext:
+
+    def __init__(self, actor_name, event_name, message, err):
+        self.actor_name = actor_name or "[actor]"
+        self.event_name = event_name
+        self.message = message
+        self.err = err
+
+    def __str__(self):
+        return "{}.{}  <-  '{}'\n{}".format(self.actor_name,
+                                        self.event_name,
+                                        str(self.message)[:30] if self.message else "message",
+                                        self.err)
+
+
 class Actor:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
@@ -19,37 +34,23 @@ class Actor:
         # Set up reactor's lifecycle observation
         self._reactor.add_observer("start", self.init)
         self._reactor.add_observer("end", self.terminate)
-        self._reactor.add_observer("event_processed", self.on_event_processed)
-        self._reactor.add_observer("timeout_processed", self.on_event_processed)
+        self._reactor.add_observer("task_processed", self._on_event_processed)
+        self._reactor.add_observer("timeout_processed", self._on_event_processed)
+        self._reactor.add_observer("error", self._handle_error)
 
         # Listen on lifecycle events
         self.add_handler("start", self.init)
         self.add_handler("end", self.terminate)
-        self.add_handler("restart", self._restart)
 
-    def queue_size(self):
-        return len(self._events_planned)
-
-    # Lifecycle methods
+    # Actor lifecycle methods
     def init(self, message):
         pass
 
     def terminate(self, message):
         pass
 
-    def on_event_processed(self, event):
-        if event in self._events_planned:
-            self._events_planned.remove(event)
-
-    def _restart(self, message):
-        self.terminate(None)
-        self.flush()
-        self.init(None)
-
-    def flush(self):
-        for event in self._events_planned:
-            event.callback.deactivate()
-        self._events_planned = set()
+    def on_error(self, error):
+        pass
 
 
     # Actor construction and setup methods
@@ -64,6 +65,28 @@ class Actor:
 
     def add_handler(self, event_name, handler):
         self._handlers[event_name] = handler
+
+
+    # Event and error handling
+    def _handle_error(self, error_message):
+        errored_event, error = error_message
+        if errored_event in self._events_planned:
+            self._events_planned.remove(errored_event)
+            self.on_error(error)
+
+    def _on_event_processed(self, event):
+        if event in self._events_planned:
+            self._events_planned.remove(event)
+
+
+    # Actor diagnostic and control methods
+    def queue_size(self):
+        return len(self._events_planned)
+
+    def flush(self):
+        for event in self._events_planned:
+            event.callback.deactivate()
+        self._events_planned = set()
 
 
     # Scheduling and sending methods
@@ -94,64 +117,3 @@ class Actor:
             for target_actor, event_name in self._targets:
                 target_actor.send(event_name, message)
 
-
-
-class ErrorContext:
-
-    def __init__(self, actor_name, event_name, message, err):
-        self.actor_name = actor_name or "[actor]"
-        self.event_name = event_name
-        self.message = message
-        self.err = err
-
-    def __str__(self):
-        return "{}.{}  <-  '{}'\n{}".format(self.actor_name, 
-                                        self.event_name, 
-                                        str(self.message)[:30] if self.message else "message", 
-                                        self.err)
-
-
-class Supervisor(Actor):
-
-    def __init__(self, reactor):
-        Actor.__init__(self, reactor)
-
-        self.add_handler("_error_handler", self.on_error)
-
-    def on_error(self, err_message):
-        assert isinstance(err_message, ErrorContext)
-        raise NotImplementedError("on_error of supervisor must be implemented!")
-
-    def supervise(self, supervised_actor):
-        assert(self is not supervised_actor)
-        supervised_actor.connect("_error_", self, "_error_handler")
-
-
-class SupervisedActor(Actor):
-
-    def __init__(self, reactor, name=None):
-        Actor.__init__(self, reactor)
-        self.name = name
-
-        self._error_ = self.make_port("_error_")
-
-    def _make_safe_callback(self, callback, event_name, message):
-        def safe_cb():
-            try:
-                callback()
-            except Exception as err:
-                error_message = ErrorContext(self.name, event_name, message, err)
-                self._error_.send(error_message)
-
-        return safe_cb
-
-    def send(self, event_name, message):
-        handler = self._handlers[event_name]
-        cb = self._make_safe_callback(lambda: handler(message), event_name, message)
-        self._schedule(cb)
-
-    def add_timeout(self, callback, delay):
-        cb = self._make_safe_callback(callback, "timeout", None)
-        self._schedule(cb, delay=delay)
-
-    

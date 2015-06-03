@@ -117,13 +117,19 @@ class Reactor:
             self._cancellations += 1
         event.callback = None
 
-    def _process_event(self, event):
-        event.process()
-        self.notify("event_processed", event)
+    def _process_event(self, event, ok="processed", err="error"):
+        try:
+            event.process()
+        except Exception as error:
+            self.notify(err, (event, error))
+        else:
+            self.notify(ok, event)
+
+    def _process_task(self, task):
+        self._process_event(task, ok="task_processed", err="error")
 
     def _process_timeout(self, timeout):
-        timeout.process()
-        self.notify("timeout_processed", timeout)
+        self._process_event(timeout, ok="timeout_processed", err="error")
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -145,7 +151,7 @@ class Reactor:
         for timeout in due_timeouts:
             self._process_timeout(timeout)
 
-    def _process_events(self, timeout):
+    def _process_tasks(self, timeout):
         """ Process events from component's queue.
         Return True if timeouted, False otherwise.
         """
@@ -157,7 +163,7 @@ class Reactor:
             # from the queue
             pass
         else:
-            self._process_event(event)
+            self._process_task(event)
 
     def _run(self):
         self.notify("start", None)
@@ -171,7 +177,7 @@ class Reactor:
                     time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
 
                 # This is where all the action happens.
-                self._process_events(time_to_nearest)
+                self._process_tasks(time_to_nearest)
 
                 if self._timeouts:
                     self._process_timeouts()
@@ -207,7 +213,7 @@ class IOReactor(Reactor):
         # Signal about this event to epoll by sending a random single byte to it
         os.write(self._inside_events_pipe[1], b'X')
 
-    def _process_events(self, timeout):
+    def _process_tasks(self, timeout):
         events = self._poll.poll(timeout)
         if not events:
             # No events -> timeout happened
@@ -218,7 +224,7 @@ class IOReactor(Reactor):
                 # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
                 event = self._queue.get_nowait()
-                self._process_event(event)
+                self._process_task(event)
             else:
                 self.process_poll_event(fd, event)
 
