@@ -14,6 +14,22 @@ class ErrorContext:
                                         self.err)
 
 
+class Port:
+    """ Port is a named set of actors to all of which an outbound message
+    will be sent through this port. Port implements pubsub routing.
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self._targets = []
+
+    def send(self, message):
+        """ Send message to all connected actors through this pubsub port.
+        """
+        for target_actor, event_name in self._targets:
+            target_actor.send(event_name, message)
+
+
 class Actor:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
@@ -54,17 +70,20 @@ class Actor:
 
 
     # Actor construction and setup methods
-    def make_port(self, name):
-        port = self._Port(name)
-        self._ports[name] = port
+    def add_handler(self, event_name, handler):
+        self._handlers[event_name] = handler
+
+    def add_port(self, port_name, port):
+        self._ports[port_name] = port
+
+    def make_port(self, port_name):
+        port = Port(port_name)
+        self.add_port(port_name, port)
         return port
 
     def connect(self, port_name, to_actor, to_event_name):
         port = self._ports[port_name]
         port._targets.append((to_actor, to_event_name))
-
-    def add_handler(self, event_name, handler):
-        self._handlers[event_name] = handler
 
 
     # Event and error handling
@@ -101,19 +120,4 @@ class Actor:
         event = self._reactor.schedule(callback, delay=delay)
         self._events_planned.add(event)
 
-
-    class _Port:
-        """ Port is a named set of actors to all of which an outbound message
-        will be sent through this port. Port implements pubsub routing.
-        """
-
-        def __init__(self, name):
-            self.name = name
-            self._targets = []
-
-        def send(self, message):
-            """ Send message to all connected actors through this pubsub port.
-            """
-            for target_actor, event_name in self._targets:
-                target_actor.send(event_name, message)
 
