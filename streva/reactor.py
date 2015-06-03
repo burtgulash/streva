@@ -122,12 +122,19 @@ class Reactor:
         event.callback = None
 
     def _process_event(self, event, ok="processed", err="processing_error"):
+        # Make 'error' variable, because if the error notification was in
+        # except clause, it would print double exceptions. Something like:
+        # Exception happened... during exception another exception happened...
+        error = None
         try:
             event.process()
-        except Exception as error:
-            self.notify(err, (event, error))
-        else:
+        except Exception as e:
+            error = e
+
+        if error is None:
             self.notify(ok, event)
+        else:
+            self.notify(err, (event, error))
 
     def _process_task(self, task):
         self._process_event(task, ok="task_processed", err="processing_error")
