@@ -19,7 +19,7 @@ class Counter(Actor):
         self.count = count_from
 
     def init(self, message):
-        def cb():
+        def cb(_):
             self.out_port.send(self.count)
             self.count += 1
 

@@ -15,10 +15,11 @@ from .stats import Stats
 
 class Event:
 
-    __slots__ = ["deadline", "callback", "processed", "delay"]
+    __slots__ = ["deadline", "delay", "callback", "message", "processed"]
 
-    def __init__(self, callback, delay=None):
+    def __init__(self, callback, message, delay=None):
         self.callback = callback
+        self.message = message
         self.processed = False
 
         self.delay = delay
@@ -27,7 +28,7 @@ class Event:
 
     def process(self):
         if self.callback:
-            self.callback()
+            self.callback(self.message)
         self.processed = True
 
     def deactivate(self):
@@ -100,13 +101,13 @@ class Reactor:
 
 
     # Scheduler methods
-    def schedule(self, callback, delay=None):
+    def schedule(self, callback, message, delay=None):
         if delay:
-            timeout = Event(callback, delay=delay)
+            timeout = Event(callback, message, delay=delay)
             heapq.heappush(self._timeouts, timeout)
             return timeout
         else:
-            event = Event(callback)
+            event = Event(callback, message)
             self._queue.put(event)
             return event
 
@@ -117,7 +118,7 @@ class Reactor:
             self._cancellations += 1
         event.callback = None
 
-    def _process_event(self, event, ok="processed", err="error"):
+    def _process_event(self, event, ok="processed", err="processing_error"):
         try:
             event.process()
         except Exception as error:
@@ -126,10 +127,10 @@ class Reactor:
             self.notify(ok, event)
 
     def _process_task(self, task):
-        self._process_event(task, ok="task_processed", err="error")
+        self._process_event(task, ok="task_processed", err="processing_error")
 
     def _process_timeout(self, timeout):
-        self._process_event(timeout, ok="timeout_processed", err="error")
+        self._process_event(timeout, ok="timeout_processed", err="processing_error")
 
     def _process_timeouts(self):
         due_timeouts = []
@@ -207,9 +208,9 @@ class IOReactor(Reactor):
         self._inside_events_pipe = os.pipe()
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
-    def schedule(self, callback, delay=None):
+    def schedule(self, callback, message, delay=None):
         # Put task message into queue
-        Reactor.schedule(self, callback, delay=delay)
+        Reactor.schedule(self, callback, message, delay=delay)
         # Signal about this event to epoll by sending a random single byte to it
         os.write(self._inside_events_pipe[1], b'X')
 

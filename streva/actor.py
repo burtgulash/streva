@@ -1,7 +1,9 @@
 
-class ErrorContext:
+class ContextException(Exception):
 
     def __init__(self, actor_name, event_name, message, err):
+        super().__init__(self, message)
+
         self.actor_name = actor_name or "[actor]"
         self.event_name = event_name
         self.message = message
@@ -43,7 +45,7 @@ class Actor:
 
         self._reactor = reactor
 
-        self._events_planned = set()
+        self._events_planned = {}
         self._handlers = {}
         self._ports = {}
 
@@ -52,7 +54,7 @@ class Actor:
         self._reactor.add_observer("end", self.terminate)
         self._reactor.add_observer("task_processed", self._on_event_processed)
         self._reactor.add_observer("timeout_processed", self._on_event_processed)
-        self._reactor.add_observer("error", self._handle_error)
+        self._reactor.add_observer("processing_error", self._handle_error)
 
         # Listen on lifecycle events
         self.add_handler("start", self.init)
@@ -66,7 +68,7 @@ class Actor:
         pass
 
     def on_error(self, error):
-        pass
+        raise error
 
 
     # Actor construction and setup methods
@@ -90,12 +92,15 @@ class Actor:
     def _handle_error(self, error_message):
         errored_event, error = error_message
         if errored_event in self._events_planned:
-            self._events_planned.remove(errored_event)
+            event_name = self._events_planned[errored_event]
+            del self._events_planned[errored_event]
+
+            error = ContextException(self.name, event_name, errored_event.message, error)
             self.on_error(error)
 
     def _on_event_processed(self, event):
         if event in self._events_planned:
-            self._events_planned.remove(event)
+            del self._events_planned[event]
 
 
     # Actor diagnostic and control methods
@@ -103,21 +108,24 @@ class Actor:
         return len(self._events_planned)
 
     def flush(self):
+        flushed_messages = []
+
         for event in self._events_planned:
             event.callback.deactivate()
-        self._events_planned = set()
+            flushed_messages.append(event.message)
+
+        self._events_planned = {}
+        return flushed_messages
 
 
     # Scheduling and sending methods
     def send(self, event_name, message):
         handler = self._handlers[event_name]
-        self._schedule(lambda: handler(message))
+        event = self._reactor.schedule(handler, message)
+        self._events_planned[event] = event_name
 
     def add_timeout(self, callback, delay):
-        self._schedule(callback, delay=delay)
-
-    def _schedule(self, callback, delay=None):
-        event = self._reactor.schedule(callback, delay=delay)
-        self._events_planned.add(event)
+        event = self._reactor.schedule(callback, None, delay)
+        self._events_planned[event] = "timeout"
 
 
