@@ -37,9 +37,18 @@ class Printer(Actor):
         super().__init__(reactor)
         self.add_handler("print", self.on_print)
 
+    def init(self, message):
+        def xxx(_):
+            raise Exception("buzno!")
+        self.add_timeout(xxx, 2)
+
     def on_print(self, count):
         logging.info("printing " + str(count))
         print("Count is:", count)
+
+    def on_error(msg):
+        print("kktek")
+        # raise msg
 
 
 def test():

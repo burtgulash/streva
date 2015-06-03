@@ -122,10 +122,14 @@ class Actor:
     def send(self, event_name, message):
         handler = self._handlers[event_name]
         event = self._reactor.schedule(handler, message)
+
+        assert event is not None
         self._events_planned[event] = event_name
 
     def add_timeout(self, callback, delay):
         event = self._reactor.schedule(callback, None, delay)
+
+        assert event is not None
         self._events_planned[event] = "timeout"
 
 

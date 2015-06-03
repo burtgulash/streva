@@ -70,6 +70,9 @@ class Reactor:
     # Lifecycle methods
     def stop(self):
         self._should_run = False
+
+        # Flush the queue with empty message if it was waiting for a timeout
+        self.schedule(lambda msg: None, None)
         self._thread.join()
 
     def start(self):
@@ -209,10 +212,17 @@ class IOReactor(Reactor):
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
     def schedule(self, callback, message, delay=None):
-        # Put task message into queue
-        Reactor.schedule(self, callback, message, delay=delay)
-        # Signal about this event to epoll by sending a random single byte to it
-        os.write(self._inside_events_pipe[1], b'X')
+        # Schedule the event (put task event into queue)
+        event = Reactor.schedule(self, callback, message, delay=delay)
+
+        if not delay:
+            # Signal about task event to epoll by sending a random single byte
+            # to it
+            os.write(self._inside_events_pipe[1], b'X')
+
+        return event
+
+
 
     def _process_tasks(self, timeout):
         events = self._poll.poll(timeout)
