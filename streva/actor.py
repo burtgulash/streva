@@ -17,24 +17,24 @@ class Actor:
         self._ports = {}
 
         # Set up reactor's lifecycle observation
-        self._reactor.add_observer("start", self.on_start)
-        self._reactor.add_observer("end", self.on_end)
+        self._reactor.add_observer("start", self.init)
+        self._reactor.add_observer("end", self.terminate)
         self._reactor.add_observer("event_processed", self.on_event_processed)
         self._reactor.add_observer("timeout_processed", self.on_event_processed)
 
         # Listen on lifecycle events
-        self.add_handler("start", self.on_start)
-        self.add_handler("end", self.on_end)
+        self.add_handler("start", self.init)
+        self.add_handler("end", self.terminate)
         self.add_handler("restart", self._restart)
 
     def queue_size(self):
         return len(self._events_planned)
 
     # Lifecycle methods
-    def on_start(self, message):
+    def init(self, message):
         pass
 
-    def on_end(self, message):
+    def terminate(self, message):
         pass
 
     def on_event_processed(self, event):
@@ -42,11 +42,11 @@ class Actor:
             self._events_planned.remove(event)
 
     def _restart(self, message):
-        self.on_end(None)
-        self._flush()
-        self.on_start(None)
+        self.terminate(None)
+        self.flush()
+        self.init(None)
 
-    def _flush(self):
+    def flush(self):
         for event in self._events_planned:
             event.callback.deactivate()
         self._events_planned = set()
