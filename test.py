@@ -8,13 +8,13 @@ from streva.supervisor import *
 
 #
 # Basic test so that this module can be tested immediately
-class Counter(MonitoredMixin, Actor):
+class Counter(SupervisorMixin, MonitoredMixin, Actor):
     """ Sample implementation of Actor which generates sequence of numbers
     in periodic intervals and sends them out for printing.
     """
 
     def __init__(self, reactor, count_from, name):
-        super().__init__(reactor=reactor, name=name)
+        super().__init__(reactor=reactor, name=name, probe_period=60)
         self.out_port = self.make_port("count")
         self.count = count_from
 
