@@ -4,7 +4,6 @@ import logging
 
 from streva.reactor import *
 from streva.actor import *
-from streva.supervisor import *
 
 #
 # Basic test so that this module can be tested immediately
