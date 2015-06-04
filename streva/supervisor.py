@@ -27,13 +27,3 @@ class Emperor:
         for reactor in self._reactors:
             reactor.stop()
 
-
-
-
-
-
-        
-
-
-
-

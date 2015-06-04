@@ -158,7 +158,7 @@ class MonitoredMixin(Actor):
         sender = msg
         sender.send("_pong", self)
 
-    def _handle_error(error_message):
+    def _handle_error(self, error_message):
         super()._handle_error(error_message)
         self.error_out.send(error_message)
 
@@ -187,10 +187,14 @@ class SupervisorMixin(Actor):
         self.add_handler("_error", self.error_received)
         self.add_handler("_pong", self._receive_pong)
 
+    def supervise(self, actor):
+        self._supervised_actors.add(actor)
+        actor.connect("_error", self, "_error")
+
     # Not responding and error handlers
     def not_responding(self, actor):
         name = actor.name or str(id(actor))
-        logging.error("Actor '{}' hasn't responded in {} seconds!".format(name, 
+        logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
                                                                     self._failure_timeout_period))
 
     def error_received(self, error_message):
@@ -199,13 +203,16 @@ class SupervisorMixin(Actor):
 
     # Supervisor processes
     def init(self, msg):
-        super().init(self, msg)       
+        super().init(msg)
 
         def probe(_):
             # Reset ping questions
-            self._ping_questions = {}
+            self._ping_questions = set()
 
             for actor in self._supervised_actors:
+                # Register question for probe of this actor
+                self._ping_questions.add(actor)
+
                 # Notice the message 'self'. Echoed actor uses that as a
                 # recipient for this ping response
                 actor.send("_ping", self)
@@ -223,7 +230,7 @@ class SupervisorMixin(Actor):
             # Failure timeout received for an actor, because it didn't respond
             # in time.
             if actor in self._ping_questions:
-                del self._ping_questions[actor]
+                self._ping_questions.remove(actor)
 
                 self.not_responding(actor)
 
@@ -235,7 +242,7 @@ class SupervisorMixin(Actor):
         # Failure timeout not yet received. Simply remove the question to
         # denote a success
         if sender in self._ping_questions:
-            del self._ping_questions[sender]
+            self._ping_questions.remove(sender)
 
 
 class Stats:
@@ -264,13 +271,14 @@ class MeasuredMixin(Actor):
         self._stats = {}
         super().__init__(**kwargs)
 
-    def get_stats():
+    def get_stats(self):
         return self._stats
 
     def add_handler(self, event_name, handler):
-        if not hasattr(self, "stats"):
-            self._stats = {}
-        self._stats[event_name] = Stats(event_name)
+        try:
+            self._stats[event_name] = Stats(event_name)
+        except AttributeError:
+            self._stats = {event_name: Stats(event_name)}
 
         super().add_handler(event_name, handler)
 
@@ -286,7 +294,7 @@ class MeasuredMixin(Actor):
         super()._handle_error(error_message)
 
         self._collect_statistics(event_name, errored_event)
-    
+
     def _schedule(self, function, message, event_name, delay=None):
         event = self.MeasuredEvent(function, message, delay=None)
         event.ok(self._on_event_processed)
@@ -296,7 +304,7 @@ class MeasuredMixin(Actor):
         self._reactor.schedule(event)
 
     def _collect_statistics(self, event_name, event):
-        stats = self._stats[event_name] 
+        stats = self._stats[event_name]
         now = time.time()
 
         stats.runs += 1
@@ -307,7 +315,7 @@ class MeasuredMixin(Actor):
     class MeasuredEvent(Event):
 
         __slots__ = "created_at", "processing_started_at"
-        
+
         def __init__(self, function, message, delay=None):
             Event.__init__(self, function, message, delay=delay)
 
@@ -316,3 +324,4 @@ class MeasuredMixin(Actor):
         def process(self):
             self.processing_started_at = time.time()
             Event.process(self)
+

@@ -14,11 +14,13 @@ class Counter(SupervisorMixin, MonitoredMixin, Actor):
     """
 
     def __init__(self, reactor, count_from, name):
-        super().__init__(reactor=reactor, name=name, probe_period=60)
+        super().__init__(reactor=reactor, name=name, timeout_period=.1, probe_period=.5)
         self.out_port = self.make_port("count")
         self.count = count_from
 
     def init(self, message):
+        super().init(message)
+
         def cb(_):
             self.out_port.send(self.count)
             self.count += 1
@@ -28,7 +30,7 @@ class Counter(SupervisorMixin, MonitoredMixin, Actor):
         self.add_timeout(cb, .1)
 
 
-class Printer(MeasuredMixin, Actor):
+class Printer(MonitoredMixin, MeasuredMixin, Actor):
     """ Sample implementation of Actor which simply prints numbers received
     from Counter.
     """
@@ -38,8 +40,7 @@ class Printer(MeasuredMixin, Actor):
         self.add_handler("print", self.on_print)
 
     def on_print(self, count):
-        logging.info("printing " + str(count))
-        print("Count is:", count)
+        logging.info("Printing " + str(count))
 
 
 def test():
@@ -50,6 +51,8 @@ def test():
     # Define logical components
     counter = Counter(reactor, 1, "counter")
     printer = Printer(io_reactor, "printer")
+
+    counter.supervise(printer)
 
     # Wire components together.
     # eg. subscribe 'printer.print' to 'counter.count'
