@@ -28,7 +28,7 @@ class Emperor:
             reactor.stop()
 
 
-class SupervisorMixin:
+class SupervisorMixin(Actor):
 
     def __init__(self, probe_period):
         self._supervised_actors = set()

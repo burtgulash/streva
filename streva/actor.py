@@ -7,7 +7,7 @@ from .reactor import Event
 class ContextException(Exception):
 
     def __init__(self, actor_name, event_name, message, err):
-        super().__init__(self, err)
+        super().__init__(err)
 
         self.actor_name = actor_name or "[actor]"
         self.event_name = event_name
@@ -44,24 +44,7 @@ class Port:
 
 
 
-class MonitoringMixin(object):
-    """ Allows the Actor object to be monitored by Supervisors.
-    """
-
-    def __init__(self):
-        self.add_handler("_ping", self._ping)
-        self.error_out = self.make_port("_error")
-
-    def _ping(self, msg):
-        sender = msg
-        sender.send("_pong", self)
-
-    def _handle_error(error_message):
-        super()._handle_error(error_message)
-        self.error_out.send(error_message)
-
-
-class Actor(MonitoringMixin):
+class Actor:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
 
@@ -85,8 +68,6 @@ class Actor(MonitoringMixin):
         # Listen on lifecycle events
         self.add_handler("start", self.init)
         self.add_handler("end", self.terminate)
-
-        MonitoringMixin.__init__(self)
 
     # Actor lifecycle methods
     def init(self, message):
@@ -164,6 +145,23 @@ class Actor(MonitoringMixin):
         self._reactor.schedule(event)
 
 
+class MonitoredMixin(Actor):
+    """ Allows the Actor object to be monitored by Supervisors.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.add_handler("_ping", self._ping)
+        self.error_out = self.make_port("_error")
+
+    def _ping(self, msg):
+        sender = msg
+        sender.send("_pong", self)
+
+    def _handle_error(error_message):
+        super()._handle_error(error_message)
+        self.error_out.send(error_message)
+
 
 
 class Stats:
@@ -186,32 +184,32 @@ Total      (total time      [s] / runs = avg [s]):  {:.6f} / {} = {:6f}
 
 
 
-class MeasuredActor(Actor):
+class MeasuredMixin(Actor):
 
-
-    def __init__(self, reactor, name=None):
+    def __init__(self, **kwargs):
         self._stats = {}
-
-        Actor.__init__(self, reactor, name=name)
+        super().__init__(**kwargs)
 
     def get_stats():
         return self._stats
 
     def add_handler(self, event_name, handler):
+        if not hasattr(self, "stats"):
+            self._stats = {}
         self._stats[event_name] = Stats(event_name)
 
-        Actor.add_handler(self, event_name, handler)
+        super().add_handler(event_name, handler)
 
     def _on_event_processed(self, event):
         event_name = self._events_planned[event]
-        Actor._on_event_processed(self, event)
+        super()._on_event_processed(event)
 
         self._collect_statistics(event_name, event)
 
     def _handle_error(self, error_message):
         errored_event, _ = error_message
         event_name = self._events_planned[errored_event]
-        Actor._handle_error(self, error_message)
+        super()._handle_error(error_message)
 
         self._collect_statistics(event_name, errored_event)
     
