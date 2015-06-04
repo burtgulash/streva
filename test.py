@@ -23,8 +23,8 @@ class Counter(Actor):
             self.out_port.send(self.count)
             self.count += 1
 
+            # Loop pattern
             self.add_timeout(cb, .1)
-
         self.add_timeout(cb, .1)
 
 

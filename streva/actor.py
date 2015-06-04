@@ -44,14 +44,21 @@ class Port:
 
 
 
-class MonitoringMixin:
+class MonitoringMixin(object):
+    """ Allows the Actor object to be monitored by Supervisors.
+    """
 
     def __init__(self):
-        self.add_handler("echo", self.echo)
+        self.add_handler("_ping", self._ping)
+        self.error_out = self.make_port("_error")
 
-    def echo(self, msg):
+    def _ping(self, msg):
         sender = msg
-        sender.send(self)
+        sender.send("_pong", self)
+
+    def _handle_error(error_message):
+        super()._handle_error(error_message)
+        self.error_out.send(error_message)
 
 
 class Actor(MonitoringMixin):
