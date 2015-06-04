@@ -1,3 +1,4 @@
+import logging
 import time
 import traceback
 from .reactor import Event
@@ -254,14 +255,14 @@ class Stats:
         self.total_time = 0
 
     def __str__(self):
-        avg_processing = self.processing_time / self.processing_time if self.runs else 0
-        avg_total = self.processing_time / self.runs if self.runs else 0
+        avg_processing = self.processing_time / self.runs if self.runs else 0
+        avg_total = self.total_time / self.runs if self.runs else 0
 
         return \
-"""Processing (processing time [s] / runs = avg [s]):  {:.6f} / {} = {:6f}
-Total      (total time      [s] / runs = avg [s]):  {:.6f} / {} = {:6f}
-""".format(self.processing_time, self.runs, self.avg_processing,
-           self.total_time, self.runs, self.avg_total)
+"""Processing (processing time [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
+Total      (total time      [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
+""".format(self.processing_time, self.runs, avg_processing,
+           self.total_time, self.runs, avg_total)
 
 
 
@@ -274,11 +275,12 @@ class MeasuredMixin(Actor):
     def get_stats(self):
         return self._stats
 
+    def print_stats(self):
+        for x, y in self._stats.items():
+            print("{}\n{}".format(x, y))
+
     def add_handler(self, event_name, handler):
-        try:
-            self._stats[event_name] = Stats(event_name)
-        except AttributeError:
-            self._stats = {event_name: Stats(event_name)}
+        self._stats[event_name] = Stats(event_name)
 
         super().add_handler(event_name, handler)
 

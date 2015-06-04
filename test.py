@@ -25,8 +25,8 @@ class Counter(SupervisorMixin, MonitoredMixin, Actor):
             self.count += 1
 
             # Loop pattern
-            self.add_timeout(cb, .1)
-        self.add_timeout(cb, .1)
+            self.add_timeout(cb, .01)
+        self.add_timeout(cb, .01)
 
 
 class Printer(MonitoredMixin, MeasuredMixin, Actor):
