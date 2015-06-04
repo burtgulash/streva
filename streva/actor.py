@@ -1,4 +1,5 @@
 import time
+import traceback
 from .reactor import Event
 
 
@@ -6,18 +7,24 @@ from .reactor import Event
 class ContextException(Exception):
 
     def __init__(self, actor_name, event_name, message, err):
-        super().__init__(self, message)
+        super().__init__(self, err)
 
         self.actor_name = actor_name or "[actor]"
         self.event_name = event_name
         self.message = message
         self.err = err
 
+    def _exc_traceback(self, err):
+        exc_info = type(err), err, err.__traceback__
+        return "".join(traceback.format_exception(*exc_info))
+
     def __str__(self):
-        return "{}.{}  <-  '{}'\n{}".format(self.actor_name,
-                                        self.event_name,
-                                        str(self.message)[:30] if self.message else "message",
-                                        self.err)
+        return """
+
+ERROR happened when actor  '{}.{}'  was sent message  '{}':
+{}""".format(self.actor_name, self.event_name,
+             str(self.message)[:30],
+             self._exc_traceback(self.err))
 
 
 class Port:
@@ -139,15 +146,41 @@ class Actor:
 
 
 
+class Stats:
+
+    def __init__(self, event_name):
+        self.event_name = event_name
+        self.runs = 0
+        self.processing_time = 0
+        self.total_time = 0
+
+    def __str__(self):
+        avg_processing = self.processing_time / self.processing_time if self.runs else 0
+        avg_total = self.processing_time / self.runs if self.runs else 0
+
+        return \
+"""Processing (processing time [s] / runs = avg [s]):  {:.6f} / {} = {:6f}
+Total      (total time      [s] / runs = avg [s]):  {:.6f} / {} = {:6f}
+""".format(self.processing_time, self.runs, self.avg_processing,
+           self.total_time, self.runs, self.avg_total)
+
+
+
 class MeasuredActor(Actor):
 
 
     def __init__(self, reactor, name=None):
+        self._stats = {}
+
         Actor.__init__(self, reactor, name=name)
 
-        self._stats = {}
-        for event_name in self._handlers:
-            self._stats[event_name] = self.Stats(event_name)
+    def get_stats():
+        return self._stats
+
+    def add_handler(self, event_name, handler):
+        self._stats[event_name] = Stats(event_name)
+
+        Actor.add_handler(self, event_name, handler)
 
     def _on_event_processed(self, event):
         event_name = self._events_planned[event]
@@ -162,8 +195,8 @@ class MeasuredActor(Actor):
 
         self._collect_statistics(event_name, errored_event)
     
-    def _schedule(function, message, event_name, delay=None):
-        event = self.MeasuredEvent(function, message, event_name, delay=None)
+    def _schedule(self, function, message, event_name, delay=None):
+        event = self.MeasuredEvent(function, message, delay=None)
         event.ok(self._on_event_processed)
         event.err(self._handle_error)
 
@@ -186,17 +219,8 @@ class MeasuredActor(Actor):
         def __init__(self, function, message, delay=None):
             Event.__init__(self, function, message, delay=delay)
 
-            self.created_at = self.now()
+            self.created_at = time.time()
 
         def process(self):
             self.processing_started_at = time.time()
             Event.process(self)
-
-
-    class Stats:
-
-        def __init__(self, event_name):
-            self.event_name = event_name
-            self.runs = 0
-            self.processing_time = 0
-            self.total_time

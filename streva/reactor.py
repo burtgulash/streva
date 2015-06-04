@@ -76,12 +76,6 @@ class Event:
 
 
 class Reactor:
-    """ Reactor class is an implementation of scheduled event loop.
-
-    A reactor can be sent messages to, which are then in turn handled by
-    component's handlers. Sleeping on the thread is implemented by timeouts,
-    which are functions delayed on the reactor's scheduler calendar.
-    """
 
     def __init__(self):
 
@@ -173,10 +167,6 @@ class Reactor:
             timeout.process()
 
     def _process_tasks(self, timeout):
-        """ Process events from component's queue.
-        Return True if timeouted, False otherwise.
-        """
-
         try:
             event = self._queue.get(timeout=timeout)
         except queue.Empty:
@@ -204,7 +194,7 @@ class Reactor:
                     self._process_timeouts()
         except:
 # http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
-            logging.exception("Component failed on exception!")
+            logging.exception("Reactor has failed on exception!")
 
         self._is_dead = True
         self.notify("end", None)
