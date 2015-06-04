@@ -1,4 +1,7 @@
+import time
 from .reactor import Event
+
+
 
 class ContextException(Exception):
 
@@ -120,8 +123,13 @@ class Actor:
     # Scheduling and sending methods
     def send(self, event_name, message):
         handler = self._handlers[event_name]
+        self._schedule(handler, message, event_name)
 
-        event = Event(handler, message)
+    def add_timeout(self, function, delay, message=None):
+        self._schedule(function, message, "timeout", delay)
+
+    def _schedule(self, function, message, event_name, delay=None):
+        event = Event(function, message, delay=delay)
         event.ok(self._on_event_processed)
         event.err(self._handle_error)
 
@@ -129,12 +137,66 @@ class Actor:
         self._reactor.schedule(event)
 
 
-    def add_timeout(self, function, delay, message=None):
-        event = Event(function, message, delay=delay)
+
+
+class MeasuredActor(Actor):
+
+
+    def __init__(self, reactor, name=None):
+        Actor.__init__(self, reactor, name=name)
+
+        self._stats = {}
+        for event_name in self._handlers:
+            self._stats[event_name] = self.Stats(event_name)
+
+    def _on_event_processed(self, event):
+        event_name = self._events_planned[event]
+        Actor._on_event_processed(self, event)
+
+        self._collect_statistics(event_name, event)
+
+    def _handle_error(self, error_message):
+        errored_event, _ = error_message
+        event_name = self._events_planned[errored_event]
+        Actor._handle_error(self, error_message)
+
+        self._collect_statistics(event_name, errored_event)
+    
+    def _schedule(function, message, event_name, delay=None):
+        event = self.MeasuredEvent(function, message, event_name, delay=None)
         event.ok(self._on_event_processed)
         event.err(self._handle_error)
 
-        self._events_planned[event] = "timeout"
-        event = self._reactor.schedule(event)
+        self._events_planned[event] = event_name
+        self._reactor.schedule(event)
+
+    def _collect_statistics(self, event_name, event):
+        stats = self._stats[event_name] 
+        now = time.time()
+
+        stats.runs += 1
+        stats.processing_time += now - event.processing_started_at
+        stats.total_time += now - event.created_at
 
 
+    class MeasuredEvent(Event):
+
+        __slots__ = "created_at", "processing_started_at"
+        
+        def __init__(self, function, message, delay=None):
+            Event.__init__(self, function, message, delay=delay)
+
+            self.created_at = self.now()
+
+        def process(self):
+            self.processing_started_at = time.time()
+            Event.process(self)
+
+
+    class Stats:
+
+        def __init__(self, event_name):
+            self.event_name = event_name
+            self.runs = 0
+            self.processing_time = 0
+            self.total_time
