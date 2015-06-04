@@ -43,7 +43,18 @@ class Port:
             target_actor.send(event_name, message)
 
 
-class Actor:
+
+class MonitoringMixin:
+
+    def __init__(self):
+        self.add_handler("echo", self.echo)
+
+    def echo(self, msg):
+        sender = msg
+        sender.send(self)
+
+
+class Actor(MonitoringMixin):
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
 
@@ -67,6 +78,8 @@ class Actor:
         # Listen on lifecycle events
         self.add_handler("start", self.init)
         self.add_handler("end", self.terminate)
+
+        MonitoringMixin.__init__(self)
 
     # Actor lifecycle methods
     def init(self, message):
@@ -224,3 +237,4 @@ class MeasuredActor(Actor):
         def process(self):
             self.processing_started_at = time.time()
             Event.process(self)
+

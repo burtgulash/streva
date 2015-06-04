@@ -9,8 +9,6 @@ import threading
 import time
 import queue
 
-from .stats import Stats
-
 
 
 class Event:
