@@ -1,3 +1,4 @@
+from .reactor import Event
 
 class ContextException(Exception):
 
@@ -52,9 +53,6 @@ class Actor:
         # Set up reactor's lifecycle observation
         self._reactor.add_observer("start", self.init)
         self._reactor.add_observer("end", self.terminate)
-        self._reactor.add_observer("task_processed", self._on_event_processed)
-        self._reactor.add_observer("timeout_processed", self._on_event_processed)
-        self._reactor.add_observer("processing_error", self._handle_error)
 
         # Listen on lifecycle events
         self.add_handler("start", self.init)
@@ -99,19 +97,20 @@ class Actor:
             self.on_error(error)
 
     def _on_event_processed(self, event):
-        if event in self._events_planned:
-            del self._events_planned[event]
+        assert event in self._events_planned
+        del self._events_planned[event]
 
 
     # Actor diagnostic and control methods
     def queue_size(self):
+        # note: queue size includes both tasks and timeouts
         return len(self._events_planned)
 
     def flush(self):
         flushed_messages = []
 
         for event in self._events_planned:
-            event.callback.deactivate()
+            event.deactivate()
             flushed_messages.append(event.message)
 
         self._events_planned = {}
@@ -121,15 +120,21 @@ class Actor:
     # Scheduling and sending methods
     def send(self, event_name, message):
         handler = self._handlers[event_name]
-        event = self._reactor.schedule(handler, message)
 
-        assert event is not None
+        event = Event(handler, message)
+        event.ok(self._on_event_processed)
+        event.err(self._handle_error)
+
         self._events_planned[event] = event_name
+        self._reactor.schedule(event)
 
-    def add_timeout(self, callback, delay):
-        event = self._reactor.schedule(callback, None, delay)
 
-        assert event is not None
+    def add_timeout(self, function, delay, message=None):
+        event = Event(function, message, delay=delay)
+        event.ok(self._on_event_processed)
+        event.err(self._handle_error)
+
         self._events_planned[event] = "timeout"
+        event = self._reactor.schedule(event)
 
 

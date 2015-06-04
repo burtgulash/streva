@@ -15,24 +15,58 @@ from .stats import Stats
 
 class Event:
 
-    __slots__ = ["deadline", "delay", "callback", "message", "processed"]
+    __slots__ = ["message",                                 # event payload - message
+                 "_function", "_on_success", "_on_error",   # callbacks
+                 "deadline", "_delay",                      # timeout time attributes
+                 "_processed"]                              # processed flag
 
-    def __init__(self, callback, message, delay=None):
-        self.callback = callback
+    def __init__(self, function, message, delay=None):
         self.message = message
-        self.processed = False
+        self._function = function
+        self._on_success = None
+        self._on_error = None
+        self._processed = False
 
-        self.delay = delay
+        self._delay = delay
         if delay is not None:
             self.deadline = time.time() + delay
 
     def process(self):
-        if self.callback:
-            self.callback(self.message)
-        self.processed = True
+        if not self._processed:
+            # Make 'error' variable, because if the error notification was in
+            # except clause, it would print double exceptions. Something like:
+            # Exception happened... during exception another exception happened...
+            error = None
+            try:
+                self._function(self.message)
+            except Exception as e:
+                error = e
+
+            if error is None:
+                if self._on_success:
+                    self._on_success(self)
+            else:
+                if self._on_error:
+                    self._on_error((self, error))
+
+        self._processed = True
+
+    def ok(self, cb):
+        self._on_success = cb
+        return self
+
+    def err(self, cb):
+        self._on_error = cb
+        return self
 
     def deactivate(self):
-        self.callback = None
+        self._processed = True
+
+    def is_processed(self):
+        return bool(self._processed)
+
+    def is_timeout(self):
+        return bool(self._delay)
 
     def __lt__(self, other):
         return self.deadline < other.deadline
@@ -46,7 +80,7 @@ class Reactor:
 
     A reactor can be sent messages to, which are then in turn handled by
     component's handlers. Sleeping on the thread is implemented by timeouts,
-    which are callbacks delayed on the reactor's scheduler calendar.
+    which are functions delayed on the reactor's scheduler calendar.
     """
 
     def __init__(self):
@@ -72,7 +106,9 @@ class Reactor:
         self._should_run = False
 
         # Flush the queue with empty message if it was waiting for a timeout
-        self.schedule(lambda msg: None, None)
+        empty_event = Event(lambda _: None, None)
+        self.schedule(empty_event)
+
         self._thread.join()
 
     def start(self):
@@ -104,48 +140,23 @@ class Reactor:
 
 
     # Scheduler methods
-    def schedule(self, callback, message, delay=None):
-        if delay:
-            timeout = Event(callback, message, delay=delay)
-            heapq.heappush(self._timeouts, timeout)
-            return timeout
+    def schedule(self, event):
+        if event.is_timeout():
+            heapq.heappush(self._timeouts, event)
         else:
-            event = Event(callback, message)
             self._queue.put(event)
-            return event
 
     def remove_event(self, event):
         # If event is delayed, ie. is a timeout, than increase timeout
         # cancellations counter
-        if event.delay is not None:
+        if event.is_timeout() is not None:
             self._cancellations += 1
-        event.callback = None
-
-    def _process_event(self, event, ok="processed", err="processing_error"):
-        # Make 'error' variable, because if the error notification was in
-        # except clause, it would print double exceptions. Something like:
-        # Exception happened... during exception another exception happened...
-        error = None
-        try:
-            event.process()
-        except Exception as e:
-            error = e
-
-        if error is None:
-            self.notify(ok, event)
-        else:
-            self.notify(err, (event, error))
-
-    def _process_task(self, task):
-        self._process_event(task, ok="task_processed", err="processing_error")
-
-    def _process_timeout(self, timeout):
-        self._process_event(timeout, ok="timeout_processed", err="processing_error")
+        event.deactivate()
 
     def _process_timeouts(self):
         due_timeouts = []
         while self._timeouts:
-            if self._timeouts[0].callback is None:
+            if self._timeouts[0].is_processed():
                 heapq.heappop(self._timeouts)
                 self._cancellations -= 1
             elif self._timeouts[0].deadline <= self.now:
@@ -155,12 +166,11 @@ class Reactor:
         if self._cancellations > 512 and \
            self._cancellations > (len(self._timeouts) >> 1):
                 self._cancellations = 0
-                self._timeouts = [x for x in self._timeouts
-                                  if x.callback is not None]
+                self._timeouts = [x for x in self._timeouts if not x.is_processed()]
                 heapq.heapify(self._timeouts)
 
         for timeout in due_timeouts:
-            self._process_timeout(timeout)
+            timeout.process()
 
     def _process_tasks(self, timeout):
         """ Process events from component's queue.
@@ -174,7 +184,7 @@ class Reactor:
             # from the queue
             pass
         else:
-            self._process_task(event)
+            event.process()
 
     def _run(self):
         self.notify("start", None)
@@ -218,18 +228,14 @@ class IOReactor(Reactor):
         self._inside_events_pipe = os.pipe()
         self._poll.register(self._inside_events_pipe[0], select.POLLIN)
 
-    def schedule(self, callback, message, delay=None):
+    def schedule(self, event):
         # Schedule the event (put task event into queue)
-        event = Reactor.schedule(self, callback, message, delay=delay)
+        Reactor.schedule(self, event)
 
-        if not delay:
+        if not event.is_timeout():
             # Signal about task event to epoll by sending a random single byte
             # to it
             os.write(self._inside_events_pipe[1], b'X')
-
-        return event
-
-
 
     def _process_tasks(self, timeout):
         events = self._poll.poll(timeout)
@@ -242,7 +248,7 @@ class IOReactor(Reactor):
                 # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
                 event = self._queue.get_nowait()
-                self._process_task(event)
+                event.process()
             else:
                 self.process_poll_event(fd, event)
 
