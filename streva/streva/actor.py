@@ -296,9 +296,11 @@ class Stats:
         avg_total = self.total_time / self.runs if self.runs else 0
 
         return \
-"""Processing (processing time [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
-Total      (total time      [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
-""".format(self.processing_time, self.runs, avg_processing,
+"""'{}' (processing time/runs = avg)
+Processing time:  {:.4f}s / {} = {:.4f}s
+Total time:       {:.4f}s / {} = {:.4f}s
+""".format(self.event_name,
+           self.processing_time, self.runs, avg_processing,
            self.total_time, self.runs, avg_total)
 
 
@@ -311,10 +313,11 @@ class MeasuredMixin(ActorBase):
         super().__init__(reactor=reactor, name=name, **kwargs)
 
     def get_stats(self):
-        return self._stats
+        return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[0]))
 
     def print_stats(self):
-        for x, y in self._stats.items():
+        print("\nSTATS for", self.name)
+        for x, y in self.get_stats():
             print("{}\n{}".format(x, y))
 
     def add_handler(self, event_name, handler):
@@ -322,11 +325,11 @@ class MeasuredMixin(ActorBase):
 
         super().add_handler(event_name, handler)
 
-    def add_timeout(self, function, delay):
+    def add_timeout(self, function, delay, message=None):
         if "timeout" not in self._stats:
             self._stats["timeout"] = Stats("timeouts")
 
-        super().add_timeout(function, delay)
+        super().add_timeout(function, delay, message)
 
     def _on_event_processed(self, event):
         event_name = self._events_planned[event]
@@ -342,7 +345,7 @@ class MeasuredMixin(ActorBase):
         self._collect_statistics(event_name, errored_event)
 
     def _schedule(self, function, message, event_name, delay=None):
-        event = self.MeasuredEvent(function, message, delay=None)
+        event = self.MeasuredEvent(function, message, delay=delay)
         event.ok(self._on_event_processed)
         event.err(self._handle_error)
 
