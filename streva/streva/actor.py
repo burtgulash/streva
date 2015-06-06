@@ -128,6 +128,14 @@ class ActorBase:
         self._events_planned = {}
         return flushed_messages
 
+    def stop(self):
+        # Stop processing new events by clearing all handlers
+        self._handlers = {}
+
+        # Clear all planned events
+        self.flush()
+
+
 
     # Scheduling and sending methods
     def send(self, event_name, message):
@@ -163,6 +171,12 @@ class MonitoredMixin(ActorBase):
         super()._handle_error(error_message)
         self.error_out.send(error_message)
 
+    def on_error(self, msg):
+        """ Delegate the error to attached supervisor. Therefore on_error need
+        not to be handled. 
+        """
+        pass
+
 
 class Actor(MonitoredMixin, ActorBase):
 
@@ -173,7 +187,7 @@ class Actor(MonitoredMixin, ActorBase):
 
 class SupervisorMixin(ActorBase):
 
-    def __init__(self, reactor, probe_period=60, timeout_period=10, **kwargs):
+    def __init__(self, reactor, name, probe_period=60, timeout_period=10, **kwargs):
         self._supervised_actors = set()
         self._ping_questions = {}
 
@@ -190,13 +204,17 @@ class SupervisorMixin(ActorBase):
         if not self._failure_timeout_period * 2 < self._probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
-        super().__init__(reactor=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=name, **kwargs)
         self.add_handler("_error", self.error_received)
         self.add_handler("_pong", self._receive_pong)
 
     def supervise(self, actor):
         self._supervised_actors.add(actor)
         actor.connect("_error", self, "_error")
+
+    def broadcast_supervised(self, event_name, msg):
+        for actor in self._supervised_actors:
+            actor.send(event_name, msg)
 
     # Not responding and error handlers
     def not_responding(self, actor):
@@ -206,6 +224,7 @@ class SupervisorMixin(ActorBase):
 
     def error_received(self, error_message):
         errored_event, error = error_message
+        raise error
 
 
     # Supervisor processes
