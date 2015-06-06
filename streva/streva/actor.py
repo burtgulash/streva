@@ -153,7 +153,7 @@ class MonitoredMixin(ActorBase):
     """
 
     def __init__(self, reactor, name, **kwargs):
-        super().__init__(reactor=reactor, name=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=name, **kwargs)
         self.add_handler("_ping", self._ping)
         self.error_out = self.make_port("_error")
 
@@ -175,7 +175,7 @@ class MonitoredMixin(ActorBase):
 class Actor(MonitoredMixin, ActorBase):
 
     def __init__(self, reactor, name, **kwargs):
-        super().__init__(reactor=reactor, name=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=name, **kwargs)
 
 
 
@@ -199,12 +199,16 @@ class SupervisorMixin(ActorBase):
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
 
-        super().__init__(reactor=reactor, name=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=name, **kwargs)
         self._reactor.add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
         self.add_handler("_pong", self._receive_pong)
 
     def supervise(self, actor):
+        if not isinstance(actor, MonitoredMixin):
+            raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
+                    format(actor.name))
+
         self._supervised_actors.add(actor)
         actor.connect("_error", self, "_error")
 
@@ -230,11 +234,15 @@ class SupervisorMixin(ActorBase):
         errored_event, error = error_message
         raise error
 
+    def on_error(self, err):
+        # To make sure no errors are overlooked, we explicitly set Supervisors'
+        # object on_error to raise its own errors. Therefore supervisors MUST
+        # override on_error in order to handle its own errors.
+        raise err
+
 
     # Supervisor processes
     def init_probe_cycle(self, msg):
-        super().init(msg)
-
         def probe(_):
             # Reset ping questions
             self._ping_questions = set()
@@ -300,7 +308,7 @@ class MeasuredMixin(ActorBase):
     def __init__(self, reactor, name, **kwargs):
         self._stats = {}
         self.last_updated = time.time()
-        super().__init__(reactor=reactor, name=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=name, **kwargs)
 
     def get_stats(self):
         return self._stats
@@ -313,6 +321,12 @@ class MeasuredMixin(ActorBase):
         self._stats[event_name] = Stats(event_name)
 
         super().add_handler(event_name, handler)
+
+    def add_timeout(self, function, delay):
+        if "timeout" not in self._stats:
+            self._stats["timeout"] = Stats("timeouts")
+
+        super().add_timeout(function, delay)
 
     def _on_event_processed(self, event):
         event_name = self._events_planned[event]

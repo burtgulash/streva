@@ -1,4 +1,4 @@
-from streva.actor import SupervisorMixin, Actor
+from streva.actor import MeasuredMixin, SupervisorMixin, Actor
 from streva.reactor import Reactor
 import threading
 
@@ -48,6 +48,7 @@ class Supervisor(SupervisorMixin, Actor):
         errored_event, error = err
         if isinstance(error, StopProduction):
             self.stop_supervised()
+            self.stop()
             self.stopped = True
 
             wait.release()
