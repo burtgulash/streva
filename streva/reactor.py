@@ -10,6 +10,8 @@ import threading
 import time
 import queue
 
+from .observable import Observable
+
 
 
 class Event:
@@ -99,9 +101,10 @@ class Emperor:
             reactor.stop()
 
 
-class Reactor:
+class Reactor(Observable):
 
     def __init__(self):
+        super().__init__()
 
         # Scheduling
         self._queue = queue.Queue()
@@ -110,9 +113,6 @@ class Reactor:
         self._WAIT_ON_EMPTY = .5
         self._timeouts = []
         self._cancellations = 0
-
-        # Handlers
-        self._observers = {}
 
         # Running
         self._thread = None
@@ -135,26 +135,6 @@ class Reactor:
 
     def is_dead(self):
         return self._is_dead
-
-
-    # Lifecycle notifications methods
-    def notify(self, event_name, message):
-        if event_name in self._observers:
-            for handler in self._observers[event_name]:
-                handler(message)
-
-    def add_observer(self, event_name, handler):
-        if event_name not in self._observers:
-            self._observers[event_name] = []
-        self._observers[event_name].append(handler)
-
-    def del_observer(self, event_name, handler):
-        if event_name in self._observers:
-            without_observer = []
-            for h in self._observers[event_name]:
-                if h != handler:
-                    without_observer.append(h)
-            self._observers[event_name] = without_observer
 
 
     # Scheduler methods
