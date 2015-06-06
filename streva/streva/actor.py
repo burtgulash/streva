@@ -114,10 +114,6 @@ class ActorBase:
 
 
     # Actor diagnostic and control methods
-    def queue_size(self):
-        # note: queue size includes both tasks and timeouts
-        return len(self._events_planned)
-
     def flush(self):
         flushed_messages = []
 
@@ -125,7 +121,6 @@ class ActorBase:
             event.deactivate()
             flushed_messages.append(event.message)
 
-        self._events_planned = {}
         return flushed_messages
 
     def stop(self):
@@ -133,8 +128,7 @@ class ActorBase:
         self._handlers = {}
 
         # Clear all planned events
-        self.flush()
-
+        return self.flush()
 
 
     # Scheduling and sending methods
@@ -171,7 +165,7 @@ class MonitoredMixin(ActorBase):
         super()._handle_error(error_message)
         self.error_out.send(error_message)
 
-    def on_error(self, msg):
+    def on_error(self, err):
         """ Delegate the error to attached supervisor. Therefore on_error need
         not to be handled. 
         """
@@ -180,8 +174,8 @@ class MonitoredMixin(ActorBase):
 
 class Actor(MonitoredMixin, ActorBase):
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, reactor, name, **kwargs):
+        super().__init__(reactor=reactor, name=name, **kwargs)
 
 
 
@@ -215,6 +209,9 @@ class SupervisorMixin(ActorBase):
     def broadcast_supervised(self, event_name, msg):
         for actor in self._supervised_actors:
             actor.send(event_name, msg)
+
+    def get_supervised(self):
+        return list(self._supervised_actors)
 
     # Not responding and error handlers
     def not_responding(self, actor):
