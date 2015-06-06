@@ -7,7 +7,7 @@ from streva.actor import *
 
 #
 # Basic test so that this module can be tested immediately
-class Counter(SupervisorMixin, MonitoredMixin, Actor):
+class Counter(SupervisorMixin, Actor):
     """ Sample implementation of Actor which generates sequence of numbers
     in periodic intervals and sends them out for printing.
     """
@@ -29,7 +29,7 @@ class Counter(SupervisorMixin, MonitoredMixin, Actor):
         self.add_timeout(cb, .01)
 
 
-class Printer(MonitoredMixin, MeasuredMixin, Actor):
+class Printer(MeasuredMixin, Actor):
     """ Sample implementation of Actor which simply prints numbers received
     from Counter.
     """

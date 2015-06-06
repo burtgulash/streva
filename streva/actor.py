@@ -45,7 +45,7 @@ class Port:
 
 
 
-class Actor:
+class ActorBase:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
 
@@ -146,7 +146,7 @@ class Actor:
         self._reactor.schedule(event)
 
 
-class MonitoredMixin(Actor):
+class MonitoredMixin(ActorBase):
     """ Allows the Actor object to be monitored by Supervisors.
     """
 
@@ -164,8 +164,14 @@ class MonitoredMixin(Actor):
         self.error_out.send(error_message)
 
 
+class Actor(MonitoredMixin, ActorBase):
 
-class SupervisorMixin(Actor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+
+class SupervisorMixin(ActorBase):
 
     def __init__(self, probe_period=60, timeout_period=10, **kwargs):
         self._supervised_actors = set()
@@ -266,10 +272,11 @@ Total      (total time      [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
 
 
 
-class MeasuredMixin(Actor):
+class MeasuredMixin(ActorBase):
 
     def __init__(self, **kwargs):
         self._stats = {}
+        self.last_updated = time.time()
         super().__init__(**kwargs)
 
     def get_stats(self):
@@ -312,6 +319,8 @@ class MeasuredMixin(Actor):
         stats.runs += 1
         stats.processing_time += now - event.processing_started_at
         stats.total_time += now - event.created_at
+
+        self.last_updated = now
 
 
     class MeasuredEvent(Event):
