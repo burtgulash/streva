@@ -40,11 +40,16 @@ class Consumer(streva.actor.Actor):
 
 class Supervisor(streva.actor.SupervisorMixin):
 
+    def __init__(self, reactor, name):
+        super().__init__(reactor=reactor, name=name)
+        self.stopped = False
+
     def error_received(self, err):
         errored_event, error = err
         if isinstance(error, StopProduction):
-            for actor in self.get_supervised():
-                actor.stop()
+            self.stop_supervised()
+            self.stopped = True
+
             wait.release()
 
 

@@ -213,6 +213,11 @@ class SupervisorMixin(ActorBase):
     def get_supervised(self):
         return list(self._supervised_actors)
 
+    def stop_supervised(self):
+        for actor in self._supervised_actors:
+            actor.stop()
+
+
     # Not responding and error handlers
     def not_responding(self, actor):
         name = actor.name or str(id(actor))
