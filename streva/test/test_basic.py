@@ -4,6 +4,9 @@ import threading
 
 
 MARGINAL_DELAY = .000001
+
+# Synchronize by locking (or sending a message metaphorically) between reactor
+# threads and main thread
 wait = threading.Lock()
 
 
@@ -41,7 +44,7 @@ class Consumer(Actor):
 class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name)
+        super().__init__(reactor=reactor, name=name, timeout_period=.1, probe_period=.5)
         self.stopped = False
 
     def error_received(self, err):
