@@ -296,9 +296,9 @@ class Stats:
         avg_total = self.total_time / self.runs if self.runs else 0
 
         return \
-"""'{}' (processing time/runs = avg)
-Processing time:  {:.4f}s / {} = {:.4f}s
-Total time:       {:.4f}s / {} = {:.4f}s
+"""+ {} (time/runs = avg time)
+    + Processing time:  {:.4f}s / {} = {:.4f}s
+    + Total time:       {:.4f}s / {} = {:.4f}s
 """.format(self.event_name,
            self.processing_time, self.runs, avg_processing,
            self.total_time, self.runs, avg_total)
@@ -316,9 +316,9 @@ class MeasuredMixin(ActorBase):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[0]))
 
     def print_stats(self):
-        print("\nSTATS for", self.name)
-        for x, y in self.get_stats():
-            print("{}\n{}".format(x, y))
+        print("\n# STATS for actor '{}'".format(self.name))
+        for _, stats in self.get_stats():
+            print(stats)
 
     def add_handler(self, event_name, handler):
         self._stats[event_name] = Stats(event_name)
