@@ -152,8 +152,8 @@ class MonitoredMixin(ActorBase):
     """ Allows the Actor object to be monitored by Supervisors.
     """
 
-    def __init__(self, reactor, **kwargs):
-        super().__init__(reactor=reactor, **kwargs)
+    def __init__(self, reactor, name, **kwargs):
+        super().__init__(reactor=reactor, name=reactor, **kwargs)
         self.add_handler("_ping", self._ping)
         self.error_out = self.make_port("_error")
 
@@ -175,7 +175,7 @@ class MonitoredMixin(ActorBase):
 class Actor(MonitoredMixin, ActorBase):
 
     def __init__(self, reactor, name, **kwargs):
-        super().__init__(reactor=reactor, name=name, **kwargs)
+        super().__init__(reactor=reactor, name=reactor, **kwargs)
 
 
 
@@ -198,7 +198,9 @@ class SupervisorMixin(ActorBase):
         if not self._failure_timeout_period * 2 < self._probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
-        super().__init__(reactor=reactor, name=name, **kwargs)
+
+        super().__init__(reactor=reactor, name=reactor, **kwargs)
+        self._reactor.add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
         self.add_handler("_pong", self._receive_pong)
 
@@ -230,7 +232,7 @@ class SupervisorMixin(ActorBase):
 
 
     # Supervisor processes
-    def init(self, msg):
+    def init_probe_cycle(self, msg):
         super().init(msg)
 
         def probe(_):
@@ -295,10 +297,10 @@ Total      (total time      [s] / runs = avg [s]):  {:.4f} / {} = {:.4f}
 
 class MeasuredMixin(ActorBase):
 
-    def __init__(self, reactor, **kwargs):
+    def __init__(self, reactor, name, **kwargs):
         self._stats = {}
         self.last_updated = time.time()
-        super().__init__(reactor=reactor, **kwargs)
+        super().__init__(reactor=reactor, name=reactor, **kwargs)
 
     def get_stats(self):
         return self._stats

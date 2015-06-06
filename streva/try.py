@@ -18,8 +18,6 @@ class Counter(SupervisorMixin, Actor):
         self.count = count_from
 
     def init(self, message):
-        super().init(message)
-
         def cb(_):
             self.out_port.send(self.count)
             self.count += 1

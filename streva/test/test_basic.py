@@ -1,5 +1,5 @@
-import streva.actor
-import streva.reactor
+from streva.actor import SupervisorMixin, Actor
+from streva.reactor import Reactor
 import threading
 
 
@@ -11,7 +11,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(streva.actor.Actor):
+class Producer(Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
@@ -27,7 +27,7 @@ class Producer(streva.actor.Actor):
         self.count += 1
 
 
-class Consumer(streva.actor.Actor):
+class Consumer(Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
@@ -38,7 +38,7 @@ class Consumer(streva.actor.Actor):
             raise StopProduction
 
 
-class Supervisor(streva.actor.SupervisorMixin):
+class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
@@ -55,7 +55,7 @@ class Supervisor(streva.actor.SupervisorMixin):
 
 
 def test_count_to_100():
-    reactor = streva.reactor.Reactor()
+    reactor = Reactor()
 
     # Define actors
     producer = Producer(reactor, "producer")
