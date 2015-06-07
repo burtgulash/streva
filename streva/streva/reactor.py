@@ -148,12 +148,14 @@ class Reactor(Observable):
             while self._should_run:
                 self.now = time.time()
 
-                time_to_nearest = self._WAIT_ON_EMPTY
+                timeout = self._WAIT_ON_EMPTY
+                # Find timeout - time to nearest scheduled timeout or default
+                # to WAIT_ON_EMPTY queue period
                 if self._timeouts:
-                    time_to_nearest = max(0, self._timeouts[0].deadline - self.now)
+                    timeout = max(0, self._timeouts[0].deadline - self.now)
 
                 # This is where all the action happens.
-                self._process_tasks(time_to_nearest)
+                self._process_tasks(timeout)
 
                 if self._timeouts:
                     self._process_timeouts()
