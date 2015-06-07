@@ -10,7 +10,8 @@ import threading
 import time
 import queue
 
-from .observable import Observable
+from streva.observable import Observable
+from streva.queue import Queue, Empty
 
 
 
@@ -82,7 +83,7 @@ class Reactor(Observable):
         super().__init__()
 
         # Scheduling
-        self._queue = queue.Queue()
+        self._queue = Queue()
         # To avoid busy waiting, wait this number of seconds if there is no
         # task or timeout to process in an iteration.
         self._WAIT_ON_EMPTY = .5
@@ -117,7 +118,7 @@ class Reactor(Observable):
         if event.is_timeout():
             heapq.heappush(self._timeouts, event)
         else:
-            self._queue.put(event)
+            self._queue.enqueue(event)
 
     def remove_event(self, event):
         # If event is delayed, ie. is a timeout, than increase timeout
@@ -147,8 +148,8 @@ class Reactor(Observable):
 
     def _process_tasks(self, timeout):
         try:
-            event = self._queue.get(timeout=timeout)
-        except queue.Empty:
+            event = self._queue.dequeue(timeout=timeout)
+        except Empty:
             # Timeout obtained means that a timeout event came before an event
             # from the queue
             pass

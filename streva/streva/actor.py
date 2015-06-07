@@ -1,7 +1,7 @@
 import logging
 import time
 import traceback
-from .reactor import Event
+from streva.reactor import Event
 
 
 
