@@ -1,11 +1,11 @@
 import logging
 import time
 import traceback
+
 from streva.reactor import Event
 
 
-
-class ContextException(Exception):
+class ErrorContext(Exception):
 
     def __init__(self, actor_name, event_name, message, err):
         super().__init__(err)
@@ -105,7 +105,7 @@ class ActorBase:
             event_name = self._events_planned[errored_event]
             del self._events_planned[errored_event]
 
-            error = ContextException(self.name, event_name, errored_event.message, error)
+            error = ErrorContext(self.name, event_name, errored_event.message, error)
             self.on_error(error)
 
     def _on_event_processed(self, event):
