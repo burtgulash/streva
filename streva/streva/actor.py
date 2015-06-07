@@ -160,11 +160,15 @@ class MonitoredMixin(ActorBase):
     def __init__(self, reactor, name, **kwargs):
         super().__init__(reactor=reactor, name=name, **kwargs)
         self.add_handler("_ping", self._ping)
+        self.add_handler("_stop", self._on_stop)
         self.error_out = self.make_port("_error")
 
     def _ping(self, msg):
         sender = msg
         sender.send("_pong", self)
+
+    def _on_stop(self, msg):
+        self.stop()
 
     def _handle_error(self, error_message):
         super()._handle_error(error_message)
@@ -217,16 +221,16 @@ class SupervisorMixin(ActorBase):
         self._supervised_actors.add(actor)
         actor.connect("_error", self, "_error")
 
-    def broadcast_supervised(self, event_name, msg):
-        for actor in self._supervised_actors:
-            actor.send(event_name, msg)
-
     def get_supervised(self):
         return list(self._supervised_actors)
 
+    def broadcast_supervised(self, event_name, msg):
+        for actor in self.get_supervised():
+            actor.send(event_name, msg)
+
     def stop_supervised(self):
-        for actor in self._supervised_actors:
-            actor.stop()
+        for actor in self.get_supervised():
+            actor.send("_stop", self, urgent=True)
 
 
     # Not responding and error handlers
