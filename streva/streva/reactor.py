@@ -114,11 +114,12 @@ class Reactor(Observable):
 
 
     # Scheduler methods
-    def schedule(self, event):
+    def schedule(self, event, prioritized=False):
         if event.is_timeout():
             heapq.heappush(self._timeouts, event)
         else:
-            self._queue.enqueue(event)
+            self._queue.enqueue(event, prioritized)
+
 
     def remove_event(self, event):
         # If event is delayed, ie. is a timeout, than increase timeout

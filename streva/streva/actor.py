@@ -132,20 +132,25 @@ class ActorBase:
 
 
     # Scheduling and sending methods
-    def send(self, event_name, message):
+    def send(self, event_name, message, urgent=False):
         handler = self._handlers[event_name]
-        self._schedule(handler, message, event_name)
+        event = self._make_event(handler, message)
+        self._register_event(event, event_name)
+        self._reactor.schedule(event, prioritized=urgent)
 
     def add_timeout(self, function, delay, message=None):
-        self._schedule(function, message, "timeout", delay)
+        event = self._make_event(function, message, delay)
+        self._register_event(event, "timeout")
+        self._reactor.schedule(event)
 
-    def _schedule(self, function, message, event_name, delay=None):
-        event = Event(function, message, delay=delay)
+    def _make_event(self, function, message, delay=None):
+        return Event(function, message, delay)
+
+    def _register_event(self, event, event_name):
         event.ok(self._on_event_processed)
         event.err(self._handle_error)
 
         self._events_planned[event] = event_name
-        self._reactor.schedule(event)
 
 
 class MonitoredMixin(ActorBase):
@@ -344,13 +349,8 @@ class MeasuredMixin(ActorBase):
 
         self._collect_statistics(event_name, errored_event)
 
-    def _schedule(self, function, message, event_name, delay=None):
-        event = self.MeasuredEvent(function, message, delay=delay)
-        event.ok(self._on_event_processed)
-        event.err(self._handle_error)
-
-        self._events_planned[event] = event_name
-        self._reactor.schedule(event)
+    def _make_event(self, function, message, delay=None):
+        return self.MeasuredEvent(function, message, delay=delay)
 
     def _collect_statistics(self, event_name, event):
         stats = self._stats[event_name]
