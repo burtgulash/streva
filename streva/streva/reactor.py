@@ -17,11 +17,6 @@ from streva.queue import Queue, Empty
 
 class Event:
 
-    __slots__ = ["message",                                 # event payload - message
-                 "_function", "_on_success", "_on_error",   # callbacks
-                 "deadline", "_delay",                      # timeout time attributes
-                 "_processed"]                              # processed flag
-
     def __init__(self, function, message, delay=None):
         self.message = message
         self._function = function
@@ -67,6 +62,9 @@ class Event:
     def is_processed(self):
         return bool(self._processed)
 
+    def is_deactivated(self):
+        return bool(self._processed)
+
     def is_timeout(self):
         return bool(self._delay)
 
@@ -88,7 +86,6 @@ class Reactor(Observable):
         # task or timeout to process in an iteration.
         self._WAIT_ON_EMPTY = .5
         self._timeouts = []
-        self._cancellations = 0
 
         # Running
         self._thread = None
@@ -122,30 +119,17 @@ class Reactor(Observable):
 
 
     def remove_event(self, event):
-        # If event is delayed, ie. is a timeout, than increase timeout
-        # cancellations counter
-        if event.is_timeout() is not None:
-            self._cancellations += 1
         event.deactivate()
 
     def _process_timeouts(self):
-        due_timeouts = []
         while self._timeouts:
-            if self._timeouts[0].is_processed():
+            if self._timeouts[0].is_deactivated():
                 heapq.heappop(self._timeouts)
-                self._cancellations -= 1
             elif self._timeouts[0].deadline <= self.now:
-                due_timeouts.append(heapq.heappop(self._timeouts))
+                timeout = heapq.heappop(self._timeouts)
+                timeout.process()
             else:
                 break
-        if self._cancellations > 512 and \
-           self._cancellations > (len(self._timeouts) >> 1):
-                self._cancellations = 0
-                self._timeouts = [x for x in self._timeouts if not x.is_processed()]
-                heapq.heapify(self._timeouts)
-
-        for timeout in due_timeouts:
-            timeout.process()
 
     def _process_tasks(self, timeout):
         try:

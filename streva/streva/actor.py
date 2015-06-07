@@ -365,8 +365,6 @@ class MeasuredMixin(ActorBase):
 
     class MeasuredEvent(Event):
 
-        __slots__ = "created_at", "processing_started_at"
-
         def __init__(self, function, message, delay=None):
             Event.__init__(self, function, message, delay=delay)
 
