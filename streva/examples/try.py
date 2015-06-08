@@ -42,7 +42,7 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name, timeout_period=1.5, probe_period=4)
+        super().__init__(reactor=reactor, name=name, timeout_period=0.5, probe_period=4)
         self.add_handler("finish", self.finish)
         self.stopped = False
 

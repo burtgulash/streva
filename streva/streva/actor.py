@@ -3,7 +3,7 @@ import logging
 import time
 import traceback
 
-from streva.reactor import Event
+from streva.reactor import Event, NORMAL, URGENT
 from streva.question import Questionnaire
 
 
@@ -120,15 +120,15 @@ class Actor:
         @wraps(handler)
         def qwrap(msg):
             handler(msg)
-            sender.add_callback("_response", callback, self, urgent)
+            sender.add_callback("_response", callback, self, URGENT)
 
-        self.add_callback(event_name, qwrap, message, -1 if urgent else 0)
+        self.add_callback(event_name, qwrap, message, URGENT if urgent else NORMAL)
 
     def send(self, event_name, message, urgent=False):
         handler = self._handlers[event_name]
-        self.add_callback(event_name, handler, message, -1 if urgent else 0)
+        self.add_callback(event_name, handler, message, URGENT if urgent else NORMAL)
 
-    def add_callback(self, event_name, function, message=None, schedule=0):
+    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
         event = self.make_event(function, message)
         self.register_event(event, event_name, schedule)
 

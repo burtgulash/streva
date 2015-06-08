@@ -17,6 +17,9 @@ class Done(Exception):
     pass
 
 
+URGENT = -1
+NORMAL = 0
+
 class Event:
 
     def __init__(self, function, message, delay=None):
@@ -88,7 +91,7 @@ class Reactor(Observable):
 
         # Flush the queue with empty message if it was waiting for a timeout
         empty_event = Event(lambda _: None, None)
-        self.schedule(empty_event, 0)
+        self.schedule(empty_event, NORMAL)
 
     def start(self):
         self._thread = threading.Thread(target=self._run)
@@ -102,8 +105,10 @@ class Reactor(Observable):
             heapq.heappush(self._timeouts, event)
         elif schedule < 0:
             self._queue.enqueue(event, prioritized=True)
-        else:
+        elif schedule == 0:
             self._queue.enqueue(event)
+        else:
+            raise ValueError("Schedule must be a number!.")
 
     def remove_event(self, event):
         event.deactivate()
