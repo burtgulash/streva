@@ -148,7 +148,7 @@ class Actor:
 
 
 class MonitoredMixin(Actor):
-    """ Allows the Actor object to be monitored by Supervisors.
+    """ Allows the Actor object to be monitored by supervisors.
     """
 
     def __init__(self, reactor, name, **kwargs):
@@ -165,7 +165,9 @@ class MonitoredMixin(Actor):
         sender.send("_pong", self)
 
     def _on_stop(self, msg):
+        sender = msg
         self.stop()
+        sender.send("_stop", self)
 
     def _err(self, error_message):
         errored_event, error = error_message
@@ -214,7 +216,8 @@ class SupervisorMixin(Actor):
 
     def __init__(self, reactor, name, probe_period=60, timeout_period=10, **kwargs):
         self._supervised_actors = set()
-        self._ping_questions = {}
+        self._ping_questions = set()
+        self._stop_questions = set()
 
         # Probe all supervised actors regularly with this time period in
         # seconds
@@ -229,11 +232,14 @@ class SupervisorMixin(Actor):
         if not self._failure_timeout_period * 2 < self._probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
+        self.stop_sent = False
+
 
         super().__init__(reactor=reactor, name=name, **kwargs)
         self._reactor.add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
         self.add_handler("_pong", self._receive_pong)
+        self.add_handler("_stop", self.receive_stop_confirmation)
 
     def supervise(self, actor):
         if not isinstance(actor, MonitoredMixin):
@@ -247,13 +253,36 @@ class SupervisorMixin(Actor):
     def get_supervised(self):
         return list(self._supervised_actors)
 
-    def broadcast_supervised(self, event_name, msg):
+    def broadcast(self, event_name, msg):
         for actor in self.get_supervised():
             actor.send(event_name, msg)
 
-    def stop_supervised(self):
-        for actor in self.get_supervised():
-            actor.send("_stop", self, urgent=True)
+    def stop_children(self):
+        def stop_timeout(_):
+            if actor in self._stop_questions:
+                self.not_responding(actor)
+                self.stop_confirmation_processed(actor)
+
+        if not self.stop_sent:
+            self.stop_sent = True
+            self.add_timeout(stop_timeout, self._failure_timeout_period)
+
+            for actor in self.get_supervised():
+                self._stop_questions.add(actor)
+                actor.send("_stop", self, urgent=True)
+
+    def stop_confirmation_processed(self, actor):
+        self._stop_questions.remove(actor)
+        if len(self._stop_questions) == 0:
+            self.all_stopped(None)
+
+    def receive_stop_confirmation(self, msg):
+        sender = msg
+        if sender in self._stop_questions:
+            self.stop_confirmation_processed(sender)
+
+    def all_stopped(self, msg):
+        pass
 
 
     # Not responding and error handlers
@@ -266,18 +295,14 @@ class SupervisorMixin(Actor):
         errored_event, error = error_message
         raise error
 
-    def on_error(self, err):
-        # To make sure no errors are overlooked, we explicitly set Supervisors'
-        # object on_error to raise its own errors. Therefore supervisors MUST
-        # override on_error in order to handle its own errors.
-        raise err
-
-
     # Supervisor processes
     def init_probe_cycle(self, msg):
         def probe(_):
             # Reset ping questions
             self._ping_questions = set()
+
+            if self.stop_sent:
+                return
 
             for actor in self._supervised_actors:
                 # Register question for probe of this actor

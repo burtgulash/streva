@@ -49,11 +49,11 @@ class Supervisor(SupervisorMixin, Actor):
         errored_event, error = err
         if isinstance(error, StopProduction):
             self.stopped = True
-            self.stop_supervised()
-            self.stop()
+            self.stop_children()
 
-            # End all action here
-            self._reactor.stop()
+    def all_stopped(self, _):
+        self.stop()
+        self._reactor.stop()
 
 
 

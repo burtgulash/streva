@@ -54,19 +54,21 @@ class Supervisor(SupervisorMixin, Actor):
     def finish(self, _):
         if not self.stopped:
             self.stopped = True
-            self.stop_supervised()
-            self.stop()
+            self.stop_children()
 
-            for actor in self.get_supervised():
-                try:
-                    actor.print_stats()
-                except AttributeError:
-                    # Some actors need not have get_stats() because they are
-                    # not MeasuredActor
-                    pass
+    def all_stopped(self, _):
+        self.stop()
 
-            # End all action here
-            self._reactor.stop()
+        for actor in self.get_supervised():
+            try:
+                actor.print_stats()
+            except AttributeError:
+                # Some actors need not have get_stats() because they are
+                # not MeasuredActor
+                pass
+
+        # End all action here
+        self._reactor.stop()
 
 
 def register_stop_signal(supervisor):

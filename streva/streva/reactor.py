@@ -146,11 +146,7 @@ class Reactor(Observable):
             self.notify("end", None)
 
 
-class IOReactor(Reactor):
-    """ IOReactor is an extension of Reactor, which can accept and send events
-    to outside world through file descriptors. Internal implementation is based
-    on 'select.epoll', therefore it only works on machines supporting epoll.
-    """
+class SocketReactor(Reactor):
 
     def __init__(self, done):
         Reactor.__init__(self, done)
@@ -162,7 +158,17 @@ class IOReactor(Reactor):
         # messages sent to this component's operations to poll through Unix
         # pipe.
         self._inside_events_pipe = os.pipe()
-        self._poll.register(self._inside_events_pipe[0], select.POLLIN)
+        self._poll.register(self._inside_events_pipe[0], select.EPOLLIN)
+
+        self._fd_handlers = {}
+
+    def add_socket(self, fd, handler):
+        self._fd_handlers[fd] = handler
+        self._poll.register(fd, select.EPOLLIN)
+
+    def del_socket(self, fd):
+        del self._fd_handlers[fd]
+        self._poll.unregister(fd)
 
     def schedule(self, event):
         # Schedule the event (put task event into queue)
@@ -172,6 +178,9 @@ class IOReactor(Reactor):
             # Signal about task event to epoll by sending a random single byte
             # to it
             os.write(self._inside_events_pipe[1], b'X')
+
+    def _process_poll_event(fd, event):
+        handler = self._fd_handlers[fd]
 
     def _process_tasks(self, timeout):
         events = self._poll.poll(timeout)
@@ -183,12 +192,9 @@ class IOReactor(Reactor):
             if fd == self._inside_events_pipe[0]:
                 # Consume the '\0' byte sent by 'send' method and process the event.
                 os.read(fd, 1)
-                event = self._queue.get_nowait()
-                event.process()
+                ev = self._queue.get_nowait()
+                ev.process()
             else:
-                self.process_poll_event(fd, event)
+                self._process_poll_event(fd, event)
 
-
-    def process_poll_event(self, fd, event):
-        raise NotImplementedError("process_poll_event must be overriden")
 
