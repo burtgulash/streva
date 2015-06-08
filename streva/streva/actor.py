@@ -129,20 +129,21 @@ class Actor:
     def register_event(self, event, event_name, prioritized=False):
         self._events_planned.add(event)
 
+        # Extract the function from object first, otherwise it would be
+        # evaluated when the function is likely changed
         f = event._function
         def wrap(message):
             self._callback(f, event.message, event)
+            self._after_processed(event)
 
         event._function = wrap
         self._reactor.schedule(event)
 
     def _callback(self, function, message, event):
         function(message)
-        self._after_processed(event)
 
     def _after_processed(self, event):
         self._events_planned.remove(event)
-        pass
 
 
 
@@ -193,8 +194,6 @@ class MonitoredMixin(Actor):
             self._ok(event)
         else:
             self._err((event, e))
-
-        self._after_processed(event)
 
     def _after_processed(self, event):
         super()._after_processed(event)
