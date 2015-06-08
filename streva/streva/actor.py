@@ -214,7 +214,7 @@ class MonitoredMixin(Actor):
 
 class SupervisorMixin(Actor):
 
-    def __init__(self, reactor, name, probe_period=60, timeout_period=10, **kwargs):
+    def __init__(self, reactor, name, probe_period=30, timeout_period=10, **kwargs):
         self._supervised_actors = set()
         self._ping_questions = set()
         self._stop_questions = set()
