@@ -24,10 +24,6 @@ class Event:
         self._function = function
         self._processed = False
 
-        self._delay = delay
-        if delay is not None:
-            self.deadline = time.time() + delay
-
     def process(self):
         if not self._processed:
             self._function(self.message)
@@ -35,6 +31,12 @@ class Event:
 
     def deactivate(self):
         self._processed = True
+
+    def add_delay(self, delay):
+        self._delay = delay
+        if delay is not None:
+            self.deadline = time.time() + delay
+
 
     def is_processed(self):
         return bool(self._processed)
@@ -83,7 +85,7 @@ class Reactor(Observable):
 
         # Flush the queue with empty message if it was waiting for a timeout
         empty_event = Event(lambda _: None, None)
-        self.schedule(empty_event)
+        self.schedule(empty_event, 0)
 
     def start(self):
         self._thread = threading.Thread(target=self._run)
@@ -91,11 +93,14 @@ class Reactor(Observable):
 
 
     # Scheduler methods
-    def schedule(self, event, prioritized=False):
-        if event.is_timeout():
+    def schedule(self, event, schedule):
+        if schedule > 0:
+            event.add_delay(schedule)
             heapq.heappush(self._timeouts, event)
+        elif schedule < 0:
+            self._queue.enqueue(event, prioritized=True)
         else:
-            self._queue.enqueue(event, prioritized)
+            self._queue.enqueue(event)
 
     def remove_event(self, event):
         event.deactivate()

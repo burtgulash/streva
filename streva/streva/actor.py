@@ -44,7 +44,6 @@ class Port:
             target_actor.send(event_name, message)
 
 
-
 class Actor:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
@@ -117,16 +116,24 @@ class Actor:
     def send(self, event_name, message, urgent=False):
         handler = self._handlers[event_name]
         event = self.make_event(handler, message)
-        self.register_event(event, event_name, prioritized=urgent)
+        schedule = -1 if urgent else 0
+        self.register_event(event, event_name, schedule)
+
+    def add_callback(self, function, message=None, schedule=0):
+        event = self.make_event(function, message)
+        if schedule > 0:
+            event_name = "_timeout"
+        else:
+            event_name = "_callback"
+        self.register_event(event, event_name, schedule)
 
     def add_timeout(self, function, delay, message=None):
-        event = self.make_event(function, message, delay)
-        self.register_event(event, "timeout")
+        self.add_callback(function, schedule=delay, message=message)
 
     def make_event(self, function, message, delay=None):
         return Event(function, message, delay)
 
-    def register_event(self, event, event_name, prioritized=False):
+    def register_event(self, event, event_name, schedule):
         self._events_planned.add(event)
 
         # Extract the function from object first, otherwise it would be
@@ -137,7 +144,7 @@ class Actor:
             self._after_processed(event)
 
         event._function = wrap
-        self._reactor.schedule(event)
+        self._reactor.schedule(event, schedule)
 
     def _callback(self, function, message, event):
         function(message)
@@ -181,9 +188,9 @@ class MonitoredMixin(Actor):
         assert event in self._event_map
         pass
 
-    def register_event(self, event, event_name, prioritized=False):
+    def register_event(self, event, event_name, schedule):
         self._event_map[event] = event_name
-        super().register_event(event, event_name, prioritized=prioritized)
+        super().register_event(event, event_name, schedule)
 
     def _callback(self, function, message, event):
         e = None
@@ -364,6 +371,8 @@ class MeasuredMixin(Actor):
 
     def __init__(self, reactor, name, **kwargs):
         self._stats = {}
+        self._stats["_timeout"] = Stats("timeouts")
+        self._stats["_callback"] = Stats("callbacks")
         self.last_updated = time.time()
         super().__init__(reactor=reactor, name=name, **kwargs)
 
@@ -389,12 +398,6 @@ class MeasuredMixin(Actor):
         self._stats[event_name] = Stats(event_name)
 
         super().add_handler(event_name, handler)
-
-    def add_timeout(self, function, delay, message=None):
-        if "timeout" not in self._stats:
-            self._stats["timeout"] = Stats("timeouts")
-
-        super().add_timeout(function, delay, message)
 
     def _after_processed(self, event):
         event_name = self.get_event_name(event)
