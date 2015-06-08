@@ -70,6 +70,12 @@ class Event:
     def is_timeout(self):
         return bool(self._delay)
 
+    def __repr__(self):
+        msg = str(self.message)[:30]
+        if self.is_timeout():
+            return "Delayed Event({}, {}, {})".format(self._function, msg, self._delay)
+        return "Event({}, {})".format(self._function, msg)
+
     def __lt__(self, other):
         return self.deadline < other.deadline
 
@@ -103,8 +109,6 @@ class Reactor(Observable):
         # Flush the queue with empty message if it was waiting for a timeout
         empty_event = Event(lambda _: None, None)
         self.schedule(empty_event)
-
-        self._thread.join()
 
     def start(self):
         self._thread = threading.Thread(target=self._run)

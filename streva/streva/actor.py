@@ -176,7 +176,7 @@ class MonitoredMixin(ActorBase):
 
     def on_error(self, err):
         """ Delegate the error to attached supervisor. Therefore on_error need
-        not to be handled. 
+        not to be handled.
         """
         pass
 

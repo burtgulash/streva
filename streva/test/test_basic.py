@@ -1,13 +1,11 @@
+import queue
+
+import streva.reactor
 from streva.actor import MeasuredMixin, SupervisorMixin, Actor
 from streva.reactor import Reactor
-import threading
 
 
 MARGINAL_DELAY = .000001
-
-# Synchronize by locking (or sending a message metaphorically) between reactor
-# threads and main thread
-wait = threading.Lock()
 
 
 class StopProduction(Exception):
@@ -50,16 +48,18 @@ class Supervisor(SupervisorMixin, Actor):
     def error_received(self, err):
         errored_event, error = err
         if isinstance(error, StopProduction):
+            self.stopped = True
             self.stop_supervised()
             self.stop()
-            self.stopped = True
 
-            wait.release()
+            # End all action here
+            self._reactor.stop()
 
 
 
 def test_count_to_100():
-    reactor = Reactor()
+    done = queue.Queue()
+    reactor = Reactor(done)
 
     # Define actors
     producer = Producer(reactor, "producer")
@@ -70,11 +70,13 @@ def test_count_to_100():
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
-    wait.acquire()
     reactor.start()
 
-    wait.acquire()
-    reactor.stop()
+    _, sig = done.get()
+    try:
+        raise sig
+    except streva.reactor.Done:
+        pass
 
     assert True
 
