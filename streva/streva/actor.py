@@ -68,6 +68,7 @@ class Actor:
         # Listen on lifecycle events
         self.add_handler("start", self.init)
         self.add_handler("end", self.terminate)
+        self.add_handler("_question", self._question)
 
     # Actor lifecycle methods
     def init(self, message):
@@ -111,20 +112,29 @@ class Actor:
         # Clear all planned events
         return self.flush()
 
+    def _question(self, msg):
+        sender, function, message = msg
+        response = function(message)
+        sender.send("_response", (self, response))
 
     # Scheduling and sending methods
+    def ask(self, sender, event_name, message, callback, urgent=False):
+        handler = self._handlers[event_name]
+        def qwrap(msg):
+            handler(msg)
+            sender.add_callback("_response", callback, self, urgent)
+        self.add_callback(event_name, qwrap, message, -1 if urgent else 0)
+
     def send(self, event_name, message, urgent=False):
         handler = self._handlers[event_name]
-        event = self.make_event(handler, message)
-        schedule = -1 if urgent else 0
-        self.register_event(event, event_name, schedule)
+        self.add_callback(event_name, handler, message, -1 if urgent else 0)
 
     def add_callback(self, event_name, function, message=None, schedule=0):
         event = self.make_event(function, message)
         self.register_event(event, event_name, schedule)
 
     def add_timeout(self, function, delay, message=None):
-        self.add_callback("_timeout", function, schedule=delay, message=message)
+        self.add_callback("_timeout", function, message, schedule=delay)
 
     def make_event(self, function, message, delay=None):
         return Event(function, message, delay)
