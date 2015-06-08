@@ -8,11 +8,13 @@ import select
 import signal
 import threading
 import time
-import queue
 
 from streva.observable import Observable
 from streva.queue import Queue, Empty
 
+
+class Done(Exception):
+    pass
 
 
 class Event:
@@ -77,8 +79,11 @@ class Event:
 
 class Reactor(Observable):
 
-    def __init__(self):
+    def __init__(self, done):
         super().__init__()
+
+        # Synchronization queue to main thread
+        self._done = done
 
         # Scheduling
         self._queue = Queue()
@@ -89,7 +94,6 @@ class Reactor(Observable):
 
         # Running
         self._thread = None
-        self._is_dead = False
         self._should_run = True
 
     # Lifecycle methods
@@ -106,9 +110,6 @@ class Reactor(Observable):
         self._thread = threading.Thread(target=self._run)
         self._thread.start()
 
-    def is_dead(self):
-        return self._is_dead
-
 
     # Scheduler methods
     def schedule(self, event, prioritized=False):
@@ -116,7 +117,6 @@ class Reactor(Observable):
             heapq.heappush(self._timeouts, event)
         else:
             self._queue.enqueue(event, prioritized)
-
 
     def remove_event(self, event):
         event.deactivate()
@@ -159,12 +159,12 @@ class Reactor(Observable):
 
                 if self._timeouts:
                     self._process_timeouts()
-        except:
-# http://stackoverflow.com/questions/5191830/python-exception-logging#comment5837573_5191885
-            logging.exception("Reactor has failed on exception!")
-
-        self._is_dead = True
-        self.notify("end", None)
+        except Exception as err:
+            self._done.put((self, err))
+        else:
+            self._done.put((self, Done()))
+        finally:
+            self.notify("end", None)
 
 
 class IOReactor(Reactor):
@@ -173,8 +173,8 @@ class IOReactor(Reactor):
     on 'select.epoll', therefore it only works on machines supporting epoll.
     """
 
-    def __init__(self):
-        Reactor.__init__(self)
+    def __init__(self, done):
+        Reactor.__init__(self, done)
 
         # Epoll object
         self._poll = select.epoll()

@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 
-from streva.actor import MeasuredMixin, SupervisorMixin, Actor
-from streva.reactor import Reactor
 import logging
+import queue
 import signal
 import threading
 
-
-# Synchronize by locking (or sending a message metaphorically) between reactor
-# threads and main thread
-wait = threading.Lock()
+from streva.actor import MeasuredMixin, SupervisorMixin, Actor
+from streva.reactor import Reactor, Done
 
 
 class StopProduction(Exception):
@@ -55,6 +52,7 @@ class Supervisor(SupervisorMixin, Actor):
 
     def finish(self, _):
         if not self.stopped:
+            self.stopped = True
             self.stop_supervised()
             self.stop()
 
@@ -64,8 +62,8 @@ class Supervisor(SupervisorMixin, Actor):
                 except AttributeError:
                     pass
 
-            self.stopped = True
-            wait.release()
+            # End all action here
+            self._reactor.stop()
 
 
 def register_stop_signal(supervisor):
@@ -77,7 +75,8 @@ def register_stop_signal(supervisor):
 
 
 if __name__ == "__main__":
-    reactor = Reactor()
+    done = queue.Queue()
+    reactor = Reactor(done)
 
     # Define actors
     producer = Producer(reactor, "producer")
@@ -95,10 +94,11 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     # Start the reactor
-    wait.acquire()
     reactor.start()
-
-    # Wait for end signal from root supervisor and end the reactor
-    wait.acquire()
-    reactor.stop()
+    
+    _, sig = done.get()
+    try:
+        raise sig
+    except Done:
+        pass
 
