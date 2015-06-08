@@ -24,6 +24,9 @@ class Event:
         self._function = function
         self._processed = False
 
+        self._delay = delay
+        self.deadline = None
+
     def process(self):
         if not self._processed:
             self._function(self.message)
