@@ -1,3 +1,4 @@
+from functools import wraps
 import logging
 import time
 import traceback
@@ -115,9 +116,12 @@ class Actor:
     # Scheduling and sending methods
     def ask(self, sender, event_name, message, callback, urgent=False):
         handler = self._handlers[event_name]
+
+        @wraps(handler)
         def qwrap(msg):
             handler(msg)
             sender.add_callback("_response", callback, self, urgent)
+
         self.add_callback(event_name, qwrap, message, -1 if urgent else 0)
 
     def send(self, event_name, message, urgent=False):
@@ -140,6 +144,8 @@ class Actor:
         # Extract the function from object first, otherwise it would be
         # evaluated when the function is likely changed
         f = event._function
+
+        @wraps(f)
         def wrap(message):
             self._callback(f, event.message, event)
             self._after_processed(event)
@@ -169,8 +175,7 @@ class MonitoredMixin(Actor):
         self.is_supervised = False
 
     def _ping(self, msg):
-        sender = msg
-        sender.send("_pong", self)
+        pass
 
     def _on_stop(self, msg):
         self.stop()
@@ -269,12 +274,11 @@ class SupervisorMixin(Actor):
             for actor in self.get_supervised():
                 self._stop_q.pose(actor, "_stop", None, urgent=True, timeout=self._failure_timeout_period)
 
-    def stop_fail(self, msg):
-        actor = msg
+    def stop_fail(self, actor):
         self.not_responding(actor)
         self.stop_ok(None)
 
-    def stop_ok(self, _):
+    def stop_ok(self, actor):
         if self._stop_q.is_empty():
             self.all_stopped(None)
 
