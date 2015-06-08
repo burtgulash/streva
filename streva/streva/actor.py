@@ -45,7 +45,7 @@ class Port:
 
 
 
-class ActorBase:
+class Actor:
     """ Actor is a logical construct sitting upon Reactor, which it uses
     as its backend.
 
@@ -58,7 +58,7 @@ class ActorBase:
 
         self._reactor = reactor
 
-        self._events_planned = {}
+        self._events_planned = set()
         self._handlers = {}
         self._ports = {}
 
@@ -77,9 +77,6 @@ class ActorBase:
     def terminate(self, message):
         pass
 
-    def on_error(self, error):
-        raise error
-
 
     # Actor construction and setup methods
     def add_handler(self, event_name, handler):
@@ -96,21 +93,6 @@ class ActorBase:
     def connect(self, port_name, to_actor, to_event_name):
         port = self._ports[port_name]
         port._targets.append((to_actor, to_event_name))
-
-
-    # Event and error handling
-    def _handle_error(self, error_message):
-        errored_event, error = error_message
-        if errored_event in self._events_planned:
-            event_name = self._events_planned[errored_event]
-            del self._events_planned[errored_event]
-
-            error = ErrorContext(self.name, event_name, errored_event.message, error)
-            self.on_error(error)
-
-    def _on_event_processed(self, event):
-        assert event in self._events_planned
-        del self._events_planned[event]
 
 
     # Actor diagnostic and control methods
@@ -134,34 +116,48 @@ class ActorBase:
     # Scheduling and sending methods
     def send(self, event_name, message, urgent=False):
         handler = self._handlers[event_name]
-        event = self._make_event(handler, message)
-        self._register_event(event, event_name)
-        self._reactor.schedule(event, prioritized=urgent)
+        event = self.make_event(handler, message)
+        self.register_event(event, event_name, prioritized=urgent)
 
     def add_timeout(self, function, delay, message=None):
-        event = self._make_event(function, message, delay)
-        self._register_event(event, "timeout")
-        self._reactor.schedule(event)
+        event = self.make_event(function, message, delay)
+        self.register_event(event, "timeout")
 
-    def _make_event(self, function, message, delay=None):
+    def make_event(self, function, message, delay=None):
         return Event(function, message, delay)
 
-    def _register_event(self, event, event_name):
-        event.ok(self._on_event_processed)
-        event.err(self._handle_error)
+    def register_event(self, event, event_name, prioritized=False):
+        self._events_planned.add(event)
 
-        self._events_planned[event] = event_name
+        f = event._function
+        def wrap(message):
+            self._callback(f, event.message, event)
+
+        event._function = wrap
+        self._reactor.schedule(event)
+
+    def _callback(self, function, message, event):
+        function(message)
+        self._after_processed(event)
+
+    def _after_processed(self, event):
+        self._events_planned.remove(event)
+        pass
 
 
-class MonitoredMixin(ActorBase):
+
+class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by Supervisors.
     """
 
     def __init__(self, reactor, name, **kwargs):
         super().__init__(reactor=reactor, name=name, **kwargs)
+        self._event_map = {}
+
         self.add_handler("_ping", self._ping)
         self.add_handler("_stop", self._on_stop)
         self.error_out = self.make_port("_error")
+        self.is_supervised = False
 
     def _ping(self, msg):
         sender = msg
@@ -170,25 +166,52 @@ class MonitoredMixin(ActorBase):
     def _on_stop(self, msg):
         self.stop()
 
-    def _handle_error(self, error_message):
-        super()._handle_error(error_message)
-        self.error_out.send(error_message)
+    def _err(self, error_message):
+        errored_event, error = error_message
+        event_name = self.get_event_name(errored_event)
 
-    def on_error(self, err):
-        """ Delegate the error to attached supervisor. Therefore on_error need
-        not to be handled.
-        """
+        error = ErrorContext(self.name, event_name, errored_event.message, error)
+        self.error_out.send(error_message)
+        self.on_error(error)
+
+    def _ok(self, event):
+        assert event in self._event_map
         pass
 
+    def register_event(self, event, event_name, prioritized=False):
+        self._event_map[event] = event_name
+        super().register_event(event, event_name, prioritized=prioritized)
 
-class Actor(MonitoredMixin, ActorBase):
+    def _callback(self, function, message, event):
+        e = None
+        try:
+            function(message)
+        except Exception as err:
+            e = err
 
-    def __init__(self, reactor, name, **kwargs):
-        super().__init__(reactor=reactor, name=name, **kwargs)
+        if e is None:
+            self._ok(event)
+        else:
+            self._err((event, e))
+
+        self._after_processed(event)
+
+    def _after_processed(self, event):
+        super()._after_processed(event)
+        del self._event_map[event]
+
+    def get_event_name(self, event):
+        assert event in self._event_map
+        return self._event_map[event]
+
+    def on_error(self, err):
+        # If there is no supervisor attached, then don't just pass the error
+        # but raise it
+        if not self.is_supervised:
+            raise err
 
 
-
-class SupervisorMixin(ActorBase):
+class SupervisorMixin(Actor):
 
     def __init__(self, reactor, name, probe_period=60, timeout_period=10, **kwargs):
         self._supervised_actors = set()
@@ -220,6 +243,7 @@ class SupervisorMixin(ActorBase):
 
         self._supervised_actors.add(actor)
         actor.connect("_error", self, "_error")
+        actor.is_supervised = True
 
     def get_supervised(self):
         return list(self._supervised_actors)
@@ -313,7 +337,7 @@ class Stats:
            self.total_time, self.runs, avg_total)
 
 
-class MeasuredMixin(ActorBase):
+class MeasuredMixin(MonitoredMixin, Actor):
 
     def __init__(self, reactor, name, **kwargs):
         self._stats = {}
@@ -348,20 +372,13 @@ class MeasuredMixin(ActorBase):
 
         super().add_timeout(function, delay, message)
 
-    def _on_event_processed(self, event):
-        event_name = self._events_planned[event]
-        super()._on_event_processed(event)
+    def _after_processed(self, event):
+        event_name = self.get_event_name(event)
+        super()._after_processed(event)
 
         self._collect_statistics(event_name, event)
 
-    def _handle_error(self, error_message):
-        errored_event, _ = error_message
-        event_name = self._events_planned[errored_event]
-        super()._handle_error(error_message)
-
-        self._collect_statistics(event_name, errored_event)
-
-    def _make_event(self, function, message, delay=None):
+    def make_event(self, function, message, delay=None):
         return self.MeasuredEvent(function, message, delay=delay)
 
     def _collect_statistics(self, event_name, event):
@@ -378,9 +395,10 @@ class MeasuredMixin(ActorBase):
     class MeasuredEvent(Event):
 
         def __init__(self, function, message, delay=None):
-            Event.__init__(self, function, message, delay=delay)
+            super().__init__(function, message, delay=delay)
 
             self.created_at = time.time()
+            self.processing_started_at = None
 
         def process(self):
             self.processing_started_at = time.time()

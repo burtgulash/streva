@@ -22,8 +22,6 @@ class Event:
     def __init__(self, function, message, delay=None):
         self.message = message
         self._function = function
-        self._on_success = None
-        self._on_error = None
         self._processed = False
 
         self._delay = delay
@@ -32,31 +30,8 @@ class Event:
 
     def process(self):
         if not self._processed:
-            # Make 'error' variable, because if the error notification was in
-            # except clause, it would print double exceptions. Something like:
-            # Exception happened... during exception another exception happened...
-            error = None
-            try:
-                self._function(self.message)
-            except Exception as e:
-                error = e
-
-            if error is None:
-                if self._on_success:
-                    self._on_success(self)
-            else:
-                if self._on_error:
-                    self._on_error((self, error))
-
+            self._function(self.message)
         self._processed = True
-
-    def ok(self, cb):
-        self._on_success = cb
-        return self
-
-    def err(self, cb):
-        self._on_error = cb
-        return self
 
     def deactivate(self):
         self._processed = True
