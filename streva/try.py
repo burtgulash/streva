@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import MeasuredMixin, SupervisorMixin, Actor, Stats
+from streva.actor import MeasuredMixin, SupervisorMixin, Actor
 from streva.reactor import Reactor, Done
 
 
@@ -43,6 +43,7 @@ class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name, timeout_period=.5, probe_period=2)
+        self.add_handler("finish", self.finish)
         self.stopped = False
 
     def error_received(self, err):
@@ -70,7 +71,7 @@ class Supervisor(SupervisorMixin, Actor):
 
 def register_stop_signal(supervisor):
     def signal_stop_handler(sig, frame):
-        supervisor.finish(None)
+        supervisor.send("finish", None, urgent=True)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)

@@ -1,7 +1,7 @@
 import queue
 
 import streva.reactor
-from streva.actor import MeasuredMixin, SupervisorMixin, Actor
+from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
 from streva.reactor import Reactor
 
 
@@ -12,7 +12,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(Actor):
+class Producer(MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
@@ -28,7 +28,7 @@ class Producer(Actor):
         self.count += 1
 
 
-class Consumer(Actor):
+class Consumer(MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
