@@ -313,7 +313,6 @@ class Stats:
            self.total_time, self.runs, avg_total)
 
 
-
 class MeasuredMixin(ActorBase):
 
     def __init__(self, reactor, name, **kwargs):
@@ -324,10 +323,19 @@ class MeasuredMixin(ActorBase):
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[0]))
 
+    def total_stats(self):
+        total = Stats("TOTAL")
+        for name, stats in self.get_stats():
+            total.runs += stats.runs
+            total.processing_time += stats.processing_time
+            total.total_time += stats.total_time
+        return total
+
     def print_stats(self):
         print("\n# STATS for actor '{}'".format(self.name))
-        for _, stats in self.get_stats():
+        for name, stats in self.get_stats():
             print(stats)
+        print(self.total_stats())
 
     def add_handler(self, event_name, handler):
         self._stats[event_name] = Stats(event_name)

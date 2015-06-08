@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import MeasuredMixin, SupervisorMixin, Actor
+from streva.actor import MeasuredMixin, SupervisorMixin, Actor, Stats
 from streva.reactor import Reactor, Done
 
 
@@ -60,6 +60,8 @@ class Supervisor(SupervisorMixin, Actor):
                 try:
                     actor.print_stats()
                 except AttributeError:
+                    # Some actors need not have get_stats() because they are
+                    # not MeasuredActor
                     pass
 
             # End all action here
