@@ -329,15 +329,14 @@ class Stats:
         avg_total = self.total_time / self.runs if self.runs else 0
 
         return \
-"""+ {} (time/runs = avg time)
-    + Processing time:  {:.4f}s / {} = {:.4f}s
-    + Total time:       {:.4f}s / {} = {:.4f}s
-""".format(self.event_name,
+"""+ {}
+    + Processing time:  {:.4f}[s] / {} = {:.4f}[s]
+    + Total time:       {:.4f}[s] / {} = {:.4f}[s]""".format(self.event_name,
            self.processing_time, self.runs, avg_processing,
            self.total_time, self.runs, avg_total)
 
 
-class MeasuredMixin(MonitoredMixin, Actor):
+class MeasuredMixin(Actor):
 
     def __init__(self, reactor, name, **kwargs):
         self._stats = {}
@@ -345,10 +344,10 @@ class MeasuredMixin(MonitoredMixin, Actor):
         super().__init__(reactor=reactor, name=name, **kwargs)
 
     def get_stats(self):
-        return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[0]))
+        return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
 
     def total_stats(self):
-        total = Stats("TOTAL")
+        total = Stats("Total")
         for name, stats in self.get_stats():
             total.runs += stats.runs
             total.processing_time += stats.processing_time
@@ -357,6 +356,7 @@ class MeasuredMixin(MonitoredMixin, Actor):
 
     def print_stats(self):
         print("\n# STATS for actor '{}'".format(self.name))
+        print("Sorted by number of runs. (total time[s]/runs = avg time[s])")
         for name, stats in self.get_stats():
             print(stats)
         print(self.total_stats())

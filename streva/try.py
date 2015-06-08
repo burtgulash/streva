@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import MeasuredMixin, SupervisorMixin, Actor
+from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
 from streva.reactor import Reactor, Done
 
 
@@ -13,7 +13,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(MeasuredMixin, Actor):
+class Producer(MeasuredMixin, MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
@@ -29,7 +29,7 @@ class Producer(MeasuredMixin, Actor):
         self.add_timeout(self.produce, .01)
 
 
-class Consumer(MeasuredMixin, Actor):
+class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor=reactor, name=name)
