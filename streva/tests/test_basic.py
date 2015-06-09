@@ -2,7 +2,7 @@ import queue
 
 import streva.reactor
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
-from streva.reactor import Reactor
+from streva.reactor import Reactor, Emperor
 
 
 MARGINAL_DELAY = .000001
@@ -69,8 +69,11 @@ def test_count_to_100():
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
-    reactor.start()
-    reactor.join()
+    emp = Emperor()
+    emp.add_reactor(reactor)
+
+    emp.start()
+    emp.join()
 
     assert True
 

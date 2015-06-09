@@ -6,7 +6,7 @@ import signal
 import threading
 
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
-from streva.reactor import Reactor, Emperor, Done
+from streva.reactor import Reactor, Emperor
 
 
 class StopProduction(Exception):
