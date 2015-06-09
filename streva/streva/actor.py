@@ -364,22 +364,20 @@ class MeasuredMixin(Actor):
         return total
 
     def print_stats(self):
-        print("\n# STATS for actor '{}'".format(self.name))
-        print("Sorted by number of runs. (total time[s]/runs = avg time[s])")
+        print("\n# STATS for actor '{}':".format(self.name))
+        print("sorted by number of runs. (total time[s]/runs = avg time[s])")
         for name, stats in self.get_stats():
             print(stats)
         print(self.get_total_stats())
 
-    def add_callback(self, event_name, function, message=None, schedule=0):
+    def register_event(self, event, event_name, schedule):
         if event_name not in self._stats:
             self._stats[event_name] = Stats(event_name)
-
-        super().add_callback(event_name, function, message, schedule)
+        super().register_event(event, event_name, schedule)
 
     def _after_processed(self, event):
         event_name = self.get_event_name(event)
         super()._after_processed(event)
-
         self._collect_statistics(event_name, event)
 
     def make_event(self, function, message, delay=None):
