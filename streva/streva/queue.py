@@ -3,6 +3,7 @@ from threading import Condition
 import time
 
 
+
 class Empty(Exception):
     pass
 
@@ -42,6 +43,4 @@ class Queue:
 
     def get_no_wait(self):
         self.dequeue(block=False)
-
-    
 

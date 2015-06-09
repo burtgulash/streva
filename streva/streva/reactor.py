@@ -1,16 +1,17 @@
 #!/usr/bin/python3
 
+import collections
 import heapq
 import functools
 import logging
 import os
+import queue
 import select
 import signal
 import threading
 import time
 
 from streva.observable import Observable
-from streva.queue import Queue, Empty
 
 
 class Done(Exception):
@@ -66,6 +67,27 @@ class Event:
         return self.deadline <= other.deadline
 
 
+class UrgentQueue(queue.Queue):
+
+    def __init__(self):
+        super().__init__()
+        self.queue = collections.deque()
+
+    def enqueue(self, x, urgent=False):
+        item = x, urgent
+        self.put(item)
+
+    def dequeue(self, block=True, timeout=None):
+        return self.get(block, timeout)
+
+    def _put(self, item):
+        x, urgent = item
+        if urgent:
+            self.queue.appendleft(x)
+        else:
+            self.queue.append(x)
+
+
 class Reactor(Observable):
 
     def __init__(self, done):
@@ -75,7 +97,7 @@ class Reactor(Observable):
         self._done = done
 
         # Scheduling
-        self._queue = Queue()
+        self._queue = UrgentQueue()
         # To avoid busy waiting, wait this number of seconds if there is no
         # task or timeout to process in an iteration.
         self._WAIT_ON_EMPTY = .5
@@ -104,7 +126,7 @@ class Reactor(Observable):
             event.add_delay(schedule)
             heapq.heappush(self._timeouts, event)
         elif schedule < 0:
-            self._queue.enqueue(event, prioritized=True)
+            self._queue.enqueue(event, urgent=True)
         elif schedule == 0:
             self._queue.enqueue(event)
         else:
@@ -126,7 +148,7 @@ class Reactor(Observable):
     def _process_tasks(self, timeout):
         try:
             event = self._queue.dequeue(timeout=timeout)
-        except Empty:
+        except queue.Empty:
             # Timeout obtained means that a timeout event came before an event
             # from the queue
             pass
