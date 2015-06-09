@@ -13,6 +13,9 @@ import time
 
 
 class Done(Exception):
+    """ Done is an exception signaled when a loop finishes
+    successfully.
+    """
     pass
 
 
@@ -65,30 +68,6 @@ class Event:
         return self.deadline <= other.deadline
 
 
-class Observable:
-
-    def __init__(self):
-        self._observers = {}
-
-    def notify(self, event_name, message):
-        if event_name in self._observers:
-            for handler in self._observers[event_name]:
-                handler(message)
-
-    def add_observer(self, event_name, handler):
-        if event_name not in self._observers:
-            self._observers[event_name] = []
-        self._observers[event_name].append(handler)
-
-    def del_observer(self, event_name, handler):
-        if event_name in self._observers:
-            without_observer = []
-            for h in self._observers[event_name]:
-                if h != handler:
-                    without_observer.append(h)
-            self._observers[event_name] = without_observer
-
-
 class UrgentQueue(queue.Queue):
     """ Implementation of blocking queue which can queue urgent items to the
     beginning of the queue instead of at the end.
@@ -113,12 +92,11 @@ class UrgentQueue(queue.Queue):
             self.queue.append(x)
 
 
-class Reactor(Observable):
+class Loop:
 
-    def __init__(self, done):
-        super().__init__()
-
+    def __init__(self, name, done):
         # Synchronization queue to main thread
+        self.name = name
         self._done = done
 
         # Scheduling
@@ -181,8 +159,6 @@ class Reactor(Observable):
             event.process()
 
     def _run(self):
-        self.notify("start", None)
-
         try:
             while self._should_run:
                 self.now = time.time()
@@ -202,59 +178,77 @@ class Reactor(Observable):
             self._done.put((self, err))
         else:
             self._done.put((self, Done()))
-        finally:
-            self.notify("end", None)
 
 
-class SocketReactor(Reactor):
+class Observable:
 
-    def __init__(self, done):
-        Reactor.__init__(self, done)
+    def __init__(self):
+        self._observers = {}
 
-        # Epoll object
-        self._poll = select.epoll()
+    def notify(self, event_name, message):
+        if event_name in self._observers:
+            for handler in self._observers[event_name]:
+                handler(message)
 
-        # Register file descriptor for internal events. We need to redirect
-        # messages sent to this component's operations to poll through Unix
-        # pipe.
-        self._inside_events_pipe = os.pipe()
-        self._poll.register(self._inside_events_pipe[0], select.EPOLLIN)
+    def add_observer(self, event_name, handler):
+        if event_name not in self._observers:
+            self._observers[event_name] = []
+        self._observers[event_name].append(handler)
 
-        self._fd_handlers = {}
+    def del_observer(self, event_name, handler):
+        if event_name in self._observers:
+            without_observer = []
+            for h in self._observers[event_name]:
+                if h != handler:
+                    without_observer.append(h)
+            self._observers[event_name] = without_observer
 
-    def add_socket(self, fd, handler):
-        self._fd_handlers[fd] = handler
-        self._poll.register(fd, select.EPOLLIN)
 
-    def del_socket(self, fd):
-        del self._fd_handlers[fd]
-        self._poll.unregister(fd)
+class Reactor(Observable):
 
-    def schedule(self, event):
-        # Schedule the event (put task event into queue)
-        Reactor.schedule(self, event)
+    def __init__(self, num_blocking=1):
+        super().__init__()
 
-        if not event.is_timeout():
-            # Signal about task event to epoll by sending a random single byte
-            # to it
-            os.write(self._inside_events_pipe[1], b'X')
+        self.num_blocking = num_blocking
+        self._done = queue.Queue()
+        self._block_loops = set()
 
-    def _process_poll_event(fd, event):
-        handler = self._fd_handlers[fd]
+        self._main_loop = Loop("main", self._done)
+        for x in range(num_blocking):
+            loop = Loop("blocking_" + str(x + 1), self._done)
+            self._block_loops.add(loop)
 
-    def _process_tasks(self, timeout):
-        events = self._poll.poll(timeout)
-        if not events:
-            # No events -> timeout happened
-            return
+    def get_loops(self):
+        return self._block_loops | set([self._main_loop])
 
-        for fd, event in events:
-            if fd == self._inside_events_pipe[0]:
-                # Consume the '\0' byte sent by 'send' method and process the event.
-                os.read(fd, 1)
-                ev = self._queue.get_nowait()
-                ev.process()
-            else:
-                self._process_poll_event(fd, event)
+    def start(self):
+        self.notify("start", None)
+        for loop in self.get_loops():
+            loop.start()
 
+    def stop(self):
+        for loop in self.get_loops():
+            loop.stop()
+
+    def join(self):
+        for x in self.get_loops():
+            loop, sig = self._done.get()
+            try:
+                raise sig
+            except Done:
+                pass
+            except:
+                # Explicitly raise
+                raise
+        self.notify("end", None)
+
+    def schedule(self, event, schedule, is_blocking=False):
+        if is_blocking:
+            import random
+            loops = self.get_loops()
+            chosen = loops[random.randint(0, len(loops))]
+        else:
+            chosen = self._main_loop
+
+        chosen.schedule(event, schedule)
 

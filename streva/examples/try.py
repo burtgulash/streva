@@ -87,8 +87,7 @@ def register_stop_signal(supervisor):
 
 
 if __name__ == "__main__":
-    done = queue.Queue()
-    reactor = Reactor(done)
+    reactor = Reactor()
 
     # Define actors
     producer = Producer(reactor, "producer")
@@ -107,10 +106,5 @@ if __name__ == "__main__":
 
     # Start the reactor
     reactor.start()
-
-    _, sig = done.get()
-    try:
-        raise sig
-    except Done:
-        pass
+    reactor.join()
 

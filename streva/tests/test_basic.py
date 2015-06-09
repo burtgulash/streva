@@ -58,8 +58,7 @@ class Supervisor(SupervisorMixin, Actor):
 
 
 def test_count_to_100():
-    done = queue.Queue()
-    reactor = Reactor(done)
+    reactor = Reactor()
 
     # Define actors
     producer = Producer(reactor, "producer")
@@ -71,12 +70,7 @@ def test_count_to_100():
     supervisor.supervise(consumer)
 
     reactor.start()
-
-    _, sig = done.get()
-    try:
-        raise sig
-    except streva.reactor.Done:
-        pass
+    reactor.join()
 
     assert True
 
