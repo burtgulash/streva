@@ -92,12 +92,37 @@ class UrgentQueue(queue.Queue):
             self.queue.append(x)
 
 
-class Loop:
+class Observable:
 
-    def __init__(self, name, done):
-        # Synchronization queue to main thread
-        self.name = name
-        self._done = done
+    def __init__(self):
+        self._observers = {}
+
+    def notify(self, event_name, message):
+        if event_name in self._observers:
+            for handler in self._observers[event_name]:
+                handler(message)
+
+    def add_observer(self, event_name, handler):
+        if event_name not in self._observers:
+            self._observers[event_name] = []
+        self._observers[event_name].append(handler)
+
+    def del_observer(self, event_name, handler):
+        if event_name in self._observers:
+            without_observer = []
+            for h in self._observers[event_name]:
+                if h != handler:
+                    without_observer.append(h)
+            self._observers[event_name] = without_observer
+
+
+class Reactor(Observable):
+
+    def __init__(self):
+        super().__init__()
+
+        # Synchronization queue to emperor thread
+        self.done_queue = None
 
         # Scheduling
         self._queue = UrgentQueue()
@@ -109,6 +134,9 @@ class Loop:
         # Running
         self._thread = None
         self._should_run = True
+
+    def synchronize(self, done):
+        self.done_queue = done
 
     def start(self):
         self._thread = threading.Thread(target=self._run)
@@ -136,94 +164,72 @@ class Loop:
         event.deactivate()
 
     def _run(self):
-        try:
-            while self._should_run:
-                self.now = time.time()
+        self.notify("start", None)
 
-                timeout = self._WAIT_ON_EMPTY
-                # Find timeout - time to nearest scheduled timeout or default
-                # to WAIT_ON_EMPTY queue period
-                if self._timeouts:
-                    timeout = max(0, self._timeouts[0].deadline - self.now)
-
-                try:
-                    event = self._queue.dequeue(timeout=timeout)
-                except queue.Empty:
-                    # Timeout obtained means that a timeout event came before
-                    # an event from the queue
-                    pass
-                else:
-                    event.process()
-
-                # Timeouts are processed after normal events, so that urgent
-                # messages are processed first
-                while self._timeouts:
-                    if self._timeouts[0].is_deactivated():
-                        heapq.heappop(self._timeouts)
-                    elif self._timeouts[0].deadline <= self.now:
-                        timeout = heapq.heappop(self._timeouts)
-                        timeout.process()
-                    else:
-                        break
-        except Exception as err:
-            self._done.put((self, err))
+        if self.done_queue:
+            try:
+                self._loop()
+            except Exception as err:
+                self.done_queue.put((self, err))
+            else:
+                self.done_queue.put((self, Done()))
         else:
-            self._done.put((self, Done()))
+            self._loop()
+
+        self.notify("end", None)
+
+    def _loop(self):
+        while self._should_run:
+            self.now = time.time()
+
+            timeout = self._WAIT_ON_EMPTY
+            # Find timeout - time to nearest scheduled timeout or default
+            # to WAIT_ON_EMPTY queue period
+            if self._timeouts:
+                timeout = max(0, self._timeouts[0].deadline - self.now)
+
+            try:
+                event = self._queue.dequeue(timeout=timeout)
+            except queue.Empty:
+                # Timeout obtained means that a timeout event came before
+                # an event from the queue
+                pass
+            else:
+                event.process()
+
+            # Timeouts are processed after normal events, so that urgent
+            # messages are processed first
+            while self._timeouts:
+                if self._timeouts[0].is_deactivated():
+                    heapq.heappop(self._timeouts)
+                elif self._timeouts[0].deadline <= self.now:
+                    timeout = heapq.heappop(self._timeouts)
+                    timeout.process()
+                else:
+                    break
 
 
-class Observable:
+class Emperor:
 
     def __init__(self):
-        self._observers = {}
+        self.done_queue = queue.Queue()
+        self._reactors = set()
 
-    def notify(self, event_name, message):
-        if event_name in self._observers:
-            for handler in self._observers[event_name]:
-                handler(message)
-
-    def add_observer(self, event_name, handler):
-        if event_name not in self._observers:
-            self._observers[event_name] = []
-        self._observers[event_name].append(handler)
-
-    def del_observer(self, event_name, handler):
-        if event_name in self._observers:
-            without_observer = []
-            for h in self._observers[event_name]:
-                if h != handler:
-                    without_observer.append(h)
-            self._observers[event_name] = without_observer
-
-
-class Reactor(Observable):
-
-    def __init__(self, num_blocking=1):
-        super().__init__()
-
-        self.num_blocking = num_blocking
-        self._done = queue.Queue()
-        self._block_loops = set()
-
-        self._main_loop = Loop("main", self._done)
-        for x in range(num_blocking):
-            loop = Loop("blocking_" + str(x + 1), self._done)
-            self._block_loops.add(loop)
-
-    def get_loops(self):
-        return self._block_loops | set([self._main_loop])
+    def add_reactor(self, reactor):
+        self._reactors.add(reactor)
+        reactor.synchronize(self.done_queue)
 
     def start(self):
-        self.notify("start", None)
-        for loop in self.get_loops():
-            loop.start()
+        for reactor in self._reactors:
+            reactor.start()
 
     def stop(self):
-        for loop in self.get_loops():
-            loop.stop()
+        for reactor in self._reactors:
+            reactor.stop()
 
     def join(self):
-        for x in self.get_loops():
-            loop, sig = self._done.get()
+        for x in self._reactors:
+            reactor, sig = self.done_queue.get()
             try:
                 raise sig
             except Done:
@@ -231,15 +237,4 @@ class Reactor(Observable):
             except:
                 # Explicitly raise
                 raise
-        self.notify("end", None)
-
-    def schedule(self, event, schedule, is_blocking=False):
-        if is_blocking:
-            import random
-            loops = self.get_loops()
-            chosen = loops[random.randint(0, len(loops))]
-        else:
-            chosen = self._main_loop
-
-        chosen.schedule(event, schedule)
 

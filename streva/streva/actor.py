@@ -36,7 +36,23 @@ class Process:
         self._reactor = reactor
         self._events_planned = set()
 
-    # Actor diagnostic and control methods
+        # Set up reactor's lifecycle observation
+        self._reactor.add_observer("start", self.init)
+        self._reactor.add_observer("end", self.terminate)
+
+    def init(self, message):
+        pass
+
+    def terminate(self, message):
+        pass
+
+    def stop(self):
+        # Stop processing new events by clearing all handlers
+        self._handlers = {}
+
+        # Clear all planned events
+        return self.flush()
+
     def flush(self):
         flushed_messages = []
 
@@ -45,13 +61,6 @@ class Process:
             flushed_messages.append(event.message)
 
         return flushed_messages
-
-    def stop(self):
-        # Stop processing new events by clearing all handlers
-        self._handlers = {}
-
-        # Clear all planned events
-        return self.flush()
 
     def _callback(self, function, message, event):
         function(message)
@@ -109,22 +118,6 @@ class Actor(Process):
 
         self._handlers = {}
         self._ports = {}
-
-        # Set up reactor's lifecycle observation
-        self._reactor.add_observer("start", self.init)
-        self._reactor.add_observer("end", self.terminate)
-
-        # Listen on lifecycle events
-        self.add_handler("start", self.init)
-        self.add_handler("end", self.terminate)
-
-    # Actor lifecycle methods
-    def init(self, message):
-        pass
-
-    def terminate(self, message):
-        pass
-
 
     # Actor construction and setup methods
     def add_handler(self, event_name, handler):

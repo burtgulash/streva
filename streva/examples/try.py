@@ -6,7 +6,7 @@ import signal
 import threading
 
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
-from streva.reactor import Reactor, Done
+from streva.reactor import Reactor, Emperor, Done
 
 
 class StopProduction(Exception):
@@ -104,7 +104,9 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
-    # Start the reactor
-    reactor.start()
-    reactor.join()
+    emp = Emperor()
+    emp.add_reactor(reactor)
+
+    emp.start()
+    emp.join()
 
