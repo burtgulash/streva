@@ -162,8 +162,8 @@ class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
-    def __init__(self, reactor, name, **kwargs):
-        super().__init__(reactor=reactor, name=name, **kwargs)
+    def __init__(self, reactor, name):
+        super().__init__(reactor, name)
         self._event_map = {}
         self.supervisor = None
 
@@ -229,7 +229,7 @@ class MonitoredMixin(Actor):
 
 class SupervisorMixin(Actor):
 
-    def __init__(self, reactor, name, probe_period=30, timeout_period=10, **kwargs):
+    def __init__(self, reactor, name, probe_period=30, timeout_period=10):
         self._supervised_actors = set()
 
         self._ping_q = Questionnaire(self, ok=self.ping_ok, fail=self.ping_fail)
@@ -251,7 +251,7 @@ class SupervisorMixin(Actor):
         self.stop_sent = False
 
 
-        super().__init__(reactor=reactor, name=name, **kwargs)
+        super().__init__(reactor, name)
 
         self._reactor.add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
@@ -351,10 +351,10 @@ class Stats:
 
 class MeasuredMixin(Actor):
 
-    def __init__(self, reactor, name, **kwargs):
+    def __init__(self, reactor, name):
         self._stats = {}
         self.last_updated = time.time()
-        super().__init__(reactor=reactor, name=name, **kwargs)
+        super().__init__(reactor, name)
 
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
