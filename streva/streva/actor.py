@@ -165,13 +165,19 @@ class MonitoredMixin(Actor):
     def __init__(self, reactor, name, **kwargs):
         super().__init__(reactor=reactor, name=name, **kwargs)
         self._event_map = {}
+        self.supervisor = None
 
-        self.add_handler("_ping", self._ping)
+        self.add_handler("_ping", self._on_ping)
         self.add_handler("_stop", self._on_stop)
         self.error_out = self.make_port("_error")
-        self.is_supervised = False
 
-    def _ping(self, msg):
+    def set_supervisor(self, supervisor):
+        self.supervisor = supervisor
+
+    def is_supervised(self):
+        return self.supervisor is not None
+
+    def _on_ping(self, msg):
         pass
 
     def _on_stop(self, msg):
@@ -216,7 +222,7 @@ class MonitoredMixin(Actor):
     def on_error(self, err):
         # If there is no supervisor attached, then don't just pass the error
         # but raise it
-        if not self.is_supervised:
+        if not self.is_supervised():
             raise err
 
 
@@ -255,7 +261,7 @@ class SupervisorMixin(Actor):
 
         self._supervised_actors.add(actor)
         actor.connect("_error", self, "_error")
-        actor.is_supervised = True
+        actor.set_supervisor(self)
 
     def get_supervised(self):
         return list(self._supervised_actors)
