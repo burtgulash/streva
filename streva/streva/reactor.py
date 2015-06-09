@@ -110,7 +110,10 @@ class Loop:
         self._thread = None
         self._should_run = True
 
-    # Lifecycle methods
+    def start(self):
+        self._thread = threading.Thread(target=self._run)
+        self._thread.start()
+
     def stop(self):
         self._should_run = False
 
@@ -118,12 +121,6 @@ class Loop:
         empty_event = Event(lambda _: None, None)
         self.schedule(empty_event, NORMAL)
 
-    def start(self):
-        self._thread = threading.Thread(target=self._run)
-        self._thread.start()
-
-
-    # Scheduler methods
     def schedule(self, event, schedule):
         if schedule > 0:
             event.add_delay(schedule)
@@ -138,26 +135,6 @@ class Loop:
     def remove_event(self, event):
         event.deactivate()
 
-    def _process_timeouts(self):
-        while self._timeouts:
-            if self._timeouts[0].is_deactivated():
-                heapq.heappop(self._timeouts)
-            elif self._timeouts[0].deadline <= self.now:
-                timeout = heapq.heappop(self._timeouts)
-                timeout.process()
-            else:
-                break
-
-    def _process_tasks(self, timeout):
-        try:
-            event = self._queue.dequeue(timeout=timeout)
-        except queue.Empty:
-            # Timeout obtained means that a timeout event came before an event
-            # from the queue
-            pass
-        else:
-            event.process()
-
     def _run(self):
         try:
             while self._should_run:
@@ -169,11 +146,25 @@ class Loop:
                 if self._timeouts:
                     timeout = max(0, self._timeouts[0].deadline - self.now)
 
-                # This is where all the action happens.
-                self._process_tasks(timeout)
+                try:
+                    event = self._queue.dequeue(timeout=timeout)
+                except queue.Empty:
+                    # Timeout obtained means that a timeout event came before
+                    # an event from the queue
+                    pass
+                else:
+                    event.process()
 
-                if self._timeouts:
-                    self._process_timeouts()
+                # Timeouts are processed after normal events, so that urgent
+                # messages are processed first
+                while self._timeouts:
+                    if self._timeouts[0].is_deactivated():
+                        heapq.heappop(self._timeouts)
+                    elif self._timeouts[0].deadline <= self.now:
+                        timeout = heapq.heappop(self._timeouts)
+                        timeout.process()
+                    else:
+                        break
         except Exception as err:
             self._done.put((self, err))
         else:
