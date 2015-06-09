@@ -11,8 +11,6 @@ import signal
 import threading
 import time
 
-from streva.observable import Observable
-
 
 class Done(Exception):
     pass
