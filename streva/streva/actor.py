@@ -325,22 +325,25 @@ class Stats:
         self.event_name = event_name
         self.runs = 0
         self.processing_time = 0
+        self.waiting_time = 0
         self.total_time = 0
 
     def __str__(self):
         avg_processing = self.processing_time / self.runs if self.runs else 0
+        avg_waiting = self.waiting_time / self.runs if self.runs else 0
         avg_total = self.total_time / self.runs if self.runs else 0
 
         return \
 """+ {}
-    + Processing time:  {:.4f}[s] / {} = {:.4f}[s]
-    + Total time:       {:.4f}[s] / {} = {:.4f}[s]""".format(self.event_name,
+    Processing time:  {:.4f}[s] / {} = {:.4f}[s]
+    Proc+Wait time:   {:.4f}[s] / {} = {:.4f}[s]""".format(self.event_name,
            self.processing_time, self.runs, avg_processing,
            self.total_time, self.runs, avg_total)
 
     def add(self, other):
         self.runs += other.runs
         self.processing_time += other.processing_time
+        self.waiting_time += other.waiting_time
         self.total_time += other.total_time
 
 
@@ -389,6 +392,7 @@ class MeasuredMixin(Actor):
         stats.runs += 1
         stats.processing_time += now - event.processing_started_at
         stats.total_time += now - event.created_at
+        stats.waiting_time = stats.total_time - stats.processing_time
 
         self.last_updated = now
 
