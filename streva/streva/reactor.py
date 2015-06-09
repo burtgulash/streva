@@ -90,6 +90,9 @@ class Observable:
 
 
 class UrgentQueue(queue.Queue):
+    """ Implementation of blocking queue which can queue urgent items to the
+    beginning of the queue instead of at the end.
+    """
 
     def __init__(self):
         super().__init__()
