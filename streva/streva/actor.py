@@ -86,8 +86,10 @@ class Process:
 
 
 class Port:
-    """ Port is a named set of actors to all of which an outbound message
-    will be sent through this port. Port implements pubsub routing.
+    """ Port is a named set of actors to all of which an outbound message will
+    be sent through this port.
+
+    Port implements pubsub routing.
     """
 
     def __init__(self, name):
@@ -95,8 +97,6 @@ class Port:
         self._targets = []
 
     def send(self, message):
-        """ Send message to all connected actors through this pubsub port.
-        """
         for target_actor, event_name in self._targets:
             target_actor.send(event_name, message)
 
@@ -169,6 +169,7 @@ class MonitoredMixin(Actor):
 
         self.add_handler("_ping", self._on_ping)
         self.add_handler("_stop", self._on_stop)
+
         self.error_out = self.make_port("_error")
 
     def set_supervisor(self, supervisor):
@@ -182,6 +183,12 @@ class MonitoredMixin(Actor):
 
     def _on_stop(self, msg):
         self.stop()
+
+    def on_error(self, err):
+        # If there is no supervisor attached, then don't just pass the error
+        # but raise it
+        if not self.is_supervised():
+            raise err
 
     def _err(self, error_message):
         errored_event, error = error_message
@@ -219,12 +226,6 @@ class MonitoredMixin(Actor):
         assert event in self._event_map
         return self._event_map[event]
 
-    def on_error(self, err):
-        # If there is no supervisor attached, then don't just pass the error
-        # but raise it
-        if not self.is_supervised():
-            raise err
-
 
 class SupervisorMixin(Actor):
 
@@ -251,6 +252,7 @@ class SupervisorMixin(Actor):
 
 
         super().__init__(reactor=reactor, name=name, **kwargs)
+
         self._reactor.add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
 
@@ -260,8 +262,8 @@ class SupervisorMixin(Actor):
                     format(actor.name))
 
         self._supervised_actors.add(actor)
-        actor.connect("_error", self, "_error")
         actor.set_supervisor(self)
+        actor.connect("_error", self, "_error")
 
     def get_supervised(self):
         return list(self._supervised_actors)
@@ -269,6 +271,10 @@ class SupervisorMixin(Actor):
     def broadcast(self, event_name, msg):
         for actor in self.get_supervised():
             actor.send(event_name, msg)
+
+    def error_received(self, error_message):
+        errored_event, error = error_message
+        raise error
 
     # Stopping
     def stop_children(self):
@@ -313,10 +319,6 @@ class SupervisorMixin(Actor):
         name = actor.name or "actor " + str(id(actor))
         logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
                                                                     self._failure_timeout_period))
-
-    def error_received(self, error_message):
-        errored_event, error = error_message
-        raise error
 
 
 class Stats:
