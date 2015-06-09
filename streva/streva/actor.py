@@ -12,7 +12,7 @@ class ErrorContext(Exception):
     def __init__(self, actor_name, event_name, message, err):
         super().__init__(err)
 
-        self.actor_name = actor_name or "[actor]"
+        self.actor_name = actor_name
         self.event_name = event_name
         self.message = message
         self.err = err
@@ -309,7 +309,7 @@ class SupervisorMixin(Actor):
 
     # Not responding and error handlers
     def not_responding(self, actor):
-        name = actor.name or "actor " + str(id(actor))
+        name = actor.name
         logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
                                                                     self._failure_timeout_period))
 
