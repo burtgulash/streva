@@ -90,11 +90,11 @@ if __name__ == "__main__":
     reactor = Reactor()
 
     # Define actors
-    producer = Producer(reactor, "producer")
     consumer = Consumer(reactor, "consumer")
-    supervisor = Supervisor(reactor, "supervisor")
-
+    producer = Producer(reactor, "producer")
     producer.connect("out", consumer, "in")
+
+    supervisor = Supervisor(reactor, "supervisor")
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
