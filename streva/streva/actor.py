@@ -338,6 +338,11 @@ class Stats:
            self.processing_time, self.runs, avg_processing,
            self.total_time, self.runs, avg_total)
 
+    def add(self, other):
+        self.runs += other.runs
+        self.processing_time += other.processing_time
+        self.total_time += other.total_time
+
 
 class MeasuredMixin(Actor):
 
@@ -349,12 +354,10 @@ class MeasuredMixin(Actor):
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
 
-    def total_stats(self):
+    def get_total_stats(self):
         total = Stats("Total")
         for name, stats in self.get_stats():
-            total.runs += stats.runs
-            total.processing_time += stats.processing_time
-            total.total_time += stats.total_time
+            total.add(stats)
         return total
 
     def print_stats(self):
@@ -362,7 +365,7 @@ class MeasuredMixin(Actor):
         print("Sorted by number of runs. (total time[s]/runs = avg time[s])")
         for name, stats in self.get_stats():
             print(stats)
-        print(self.total_stats())
+        print(self.get_total_stats())
 
     def add_callback(self, event_name, function, message=None, schedule=0):
         if event_name not in self._stats:

@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
+from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
 from streva.reactor import Reactor, Done
 
 
@@ -51,6 +51,20 @@ class Supervisor(SupervisorMixin, Actor):
         logging.exception(err)
         self.finish(None)
 
+    def print_statistics(self):
+        bottomline = Stats("TOTAL RUN STATISTICS")
+        for actor in self.get_supervised():
+            try:
+                actor.print_stats()
+                bottomline.add(actor.get_total_stats())
+            except AttributeError:
+                # Some actors need not have get_stats() because they are
+                # not MeasuredActor
+                pass
+
+        print("\n--------------------------------------------------")
+        print(bottomline)
+
     def finish(self, _):
         if not self.stopped:
             self.stopped = True
@@ -58,17 +72,10 @@ class Supervisor(SupervisorMixin, Actor):
 
     def all_stopped(self, _):
         self.stop()
-
-        for actor in self.get_supervised():
-            try:
-                actor.print_stats()
-            except AttributeError:
-                # Some actors need not have get_stats() because they are
-                # not MeasuredActor
-                pass
-
         # End all action here
         self._reactor.stop()
+
+        self.print_statistics()
 
 
 def register_stop_signal(supervisor):
@@ -100,7 +107,7 @@ if __name__ == "__main__":
 
     # Start the reactor
     reactor.start()
-    
+
     _, sig = done.get()
     try:
         raise sig
