@@ -364,11 +364,6 @@ class MeasuredMixin(Actor):
             print(stats)
         print(self.total_stats())
 
-    def add_handler(self, event_name, handler):
-        self._stats[event_name] = Stats(event_name)
-
-        super().add_handler(event_name, handler)
-
     def add_callback(self, event_name, function, message=None, schedule=0):
         if event_name not in self._stats:
             self._stats[event_name] = Stats(event_name)
