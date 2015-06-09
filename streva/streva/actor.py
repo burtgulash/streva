@@ -30,6 +30,61 @@ ERROR happened when actor  '{}.{}'  was sent message  '{}':
              self._exc_traceback(self.err))
 
 
+class Process:
+
+    def __init__(self, reactor):
+        self._reactor = reactor
+        self._events_planned = set()
+
+    # Actor diagnostic and control methods
+    def flush(self):
+        flushed_messages = []
+
+        for event in self._events_planned:
+            event.deactivate()
+            flushed_messages.append(event.message)
+
+        return flushed_messages
+
+    def stop(self):
+        # Stop processing new events by clearing all handlers
+        self._handlers = {}
+
+        # Clear all planned events
+        return self.flush()
+
+    def _callback(self, function, message, event):
+        function(message)
+
+    def _after_processed(self, event):
+        self._events_planned.remove(event)
+
+    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
+        event = self.make_event(function, message)
+        self.register_event(event, event_name, schedule)
+
+    def add_timeout(self, function, delay, message=None):
+        self.add_callback("_timeout", function, message, schedule=delay)
+
+    def make_event(self, function, message, delay=None):
+        return Event(function, message, delay)
+
+    def register_event(self, event, event_name, schedule):
+        self._events_planned.add(event)
+
+        # Extract the function from object first, otherwise it would be
+        # evaluated when the function is likely changed
+        f = event._function
+
+        @wraps(f)
+        def wrap(message):
+            self._callback(f, event.message, event)
+            self._after_processed(event)
+
+        event._function = wrap
+        self._reactor.schedule(event, schedule)
+
+
 class Port:
     """ Port is a named set of actors to all of which an outbound message
     will be sent through this port. Port implements pubsub routing.
@@ -46,20 +101,12 @@ class Port:
             target_actor.send(event_name, message)
 
 
-class Actor:
-    """ Actor is a logical construct sitting upon Reactor, which it uses
-    as its backend.
-
-    Actors can route outgoing messages through Ports. Port is a publisher
-    mechanism, which sends messages to its subscribers.
-    """
+class Actor(Process):
 
     def __init__(self, reactor, name):
+        super().__init__(reactor)
         self.name = name
 
-        self._reactor = reactor
-
-        self._events_planned = set()
         self._handlers = {}
         self._ports = {}
 
@@ -95,70 +142,20 @@ class Actor:
         port = self._ports[port_name]
         port._targets.append((to_actor, to_event_name))
 
-
-    # Actor diagnostic and control methods
-    def flush(self):
-        flushed_messages = []
-
-        for event in self._events_planned:
-            event.deactivate()
-            flushed_messages.append(event.message)
-
-        return flushed_messages
-
-    def stop(self):
-        # Stop processing new events by clearing all handlers
-        self._handlers = {}
-
-        # Clear all planned events
-        return self.flush()
-
-    # Scheduling and sending methods
-    def ask(self, sender, event_name, message, callback, urgent=False):
+    def send(self, event_name, message, respond=None, urgent=False):
         handler = self._handlers[event_name]
 
-        @wraps(handler)
-        def qwrap(msg):
-            handler(msg)
-            sender.add_callback("_response", callback, self, URGENT)
+        f = handler
+        if respond is not None:
+            sender, callback = respond
 
-        self.add_callback(event_name, qwrap, message, URGENT if urgent else NORMAL)
+            @wraps(handler)
+            def resp_wrap(msg):
+                handler(msg)
+                sender.add_callback("_response", callback, self, URGENT)
+            f = resp_wrap
 
-    def send(self, event_name, message, urgent=False):
-        handler = self._handlers[event_name]
-        self.add_callback(event_name, handler, message, URGENT if urgent else NORMAL)
-
-    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
-        event = self.make_event(function, message)
-        self.register_event(event, event_name, schedule)
-
-    def add_timeout(self, function, delay, message=None):
-        self.add_callback("_timeout", function, message, schedule=delay)
-
-    def make_event(self, function, message, delay=None):
-        return Event(function, message, delay)
-
-    def register_event(self, event, event_name, schedule):
-        self._events_planned.add(event)
-
-        # Extract the function from object first, otherwise it would be
-        # evaluated when the function is likely changed
-        f = event._function
-
-        @wraps(f)
-        def wrap(message):
-            self._callback(f, event.message, event)
-            self._after_processed(event)
-
-        event._function = wrap
-        self._reactor.schedule(event, schedule)
-
-    def _callback(self, function, message, event):
-        function(message)
-
-    def _after_processed(self, event):
-        self._events_planned.remove(event)
-
+        self.add_callback(event_name, f, message, URGENT if urgent else NORMAL)
 
 
 class MonitoredMixin(Actor):

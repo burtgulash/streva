@@ -19,7 +19,7 @@ class Questionnaire:
 
     def pose(self, respondent, event_name, message, timeout, urgent=False):
         self.respondents.add(respondent)
-        respondent.ask(self.questioner, event_name, message, self._response_callback, urgent=urgent)
+        respondent.send(event_name, message, respond=(self.questioner, self._response_callback), urgent=urgent)
         self._register_failure_timeout(respondent, timeout)
 
     def _response_callback(self, msg):
