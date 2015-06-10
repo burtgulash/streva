@@ -24,9 +24,9 @@ NORMAL = 0
 
 class Cancellable:
 
-    def __init__(self, f, cleanup):
+    def __init__(self, f):
         self.f = f
-        self.cleanup = cleanup
+        self.cleanup = lambda: None
         self.cancelled = False
         self.finished = False
 
@@ -35,6 +35,9 @@ class Cancellable:
             self.f()
         self.cleanup()
         self.finished = True
+
+    def add_cleanup_f(self, cleanup_f):
+        self.cleanup = cleanup_f
 
     def cancel(self):
         self.finished = True

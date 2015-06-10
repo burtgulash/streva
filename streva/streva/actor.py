@@ -52,9 +52,6 @@ class Process:
         for f in self._planned:
             f.cancel()
 
-    def after_cleanup(self):
-        del self._planned[id_]
-
     def stop(self):
         self.call(self.flush, URGENT)
         self.stopped = True
@@ -65,11 +62,11 @@ class Process:
             def baked():
                 function(*args, **kwargs)
 
-            func = Cancellable(baked, self.after_cleanup)
-            def cleanup():
-                del self._planned[func]
+            func = Cancellable(baked)
 
-            func.
+            def cleanup():
+                self._planned.remove(func)
+            func.add_cleanup_f(cleanup)
 
             self._reactor.schedule(func, schedule)
 
