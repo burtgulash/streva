@@ -260,102 +260,6 @@ class MonitoredMixin(Actor):
         super()._add_callback(operation, try_function, message, schedule)
 
 
-
-class SupervisorMixin(Actor):
-
-    def __init__(self, loop, name, probe_period=30, timeout_period=10):
-        self._supervised_actors = set()
-
-        self._ping_q = Questionnaire(self, ok=self.ping_ok, fail=self.ping_fail)
-        self._stop_q = Questionnaire(self, ok=self.stop_ok, fail=self.stop_fail)
-
-        # Probe all supervised actors regularly with this time period in
-        # seconds
-        self._probe_period = probe_period
-
-        # Echo timeouts after this many seconds. Ie. this means the time period
-        # after which a supervised actor should be recognized as dead
-        self._failure_timeout_period = timeout_period
-
-        # Make sure that all actors are evaluated of one round of probing
-        # before next round of probing
-        if not self._failure_timeout_period * 2 < self._probe_period:
-            raise Exception("Timeout_period should be at most half the period of probe_period.")
-
-        self.stop_sent = False
-
-
-        super().__init__(loop, name)
-
-        self.get_loop().add_observer("start", self.init_probe_cycle)
-        self.add_handler("_error", self.error_received)
-
-    def supervise(self, actor):
-        if not isinstance(actor, MonitoredMixin):
-            raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
-                    format(actor.name))
-
-        self._supervised_actors.add(actor)
-        actor.set_supervisor(self)
-        actor.connect("_error", self, "_error")
-
-    def get_supervised(self):
-        return list(self._supervised_actors)
-
-    def broadcast(self, operation, msg):
-        for actor in self.get_supervised():
-            actor.send(operation, msg)
-
-    def error_received(self, error_context):
-        actor, error = error_context.actor, error_context.err
-        raise error
-
-    # Stopping
-    def stop_children(self):
-        if not self.stop_sent:
-            self.stop_sent = True
-            for actor in self.get_supervised():
-                self._stop_q.pose(actor, "_stop", None, urgent=True, timeout=self._failure_timeout_period)
-
-    def stop_fail(self, actor):
-        self.not_responding(actor)
-        if self._stop_q.is_empty():
-            self.all_stopped(None)
-
-    def stop_ok(self, actor):
-        if self._stop_q.is_empty():
-            self.all_stopped(None)
-
-    def all_stopped(self, msg):
-        pass
-
-
-    # Supervisor processes
-    def init_probe_cycle(self):
-        def probe(_):
-            if not self.stop_sent:
-                self._ping_q.clear()
-                for actor in self._supervised_actors:
-                    self._ping_q.pose(actor, "_ping", None, urgent=True, timeout=self._failure_timeout_period)
-
-                # Loop pattern: repeat probing process
-                self.add_timeout(probe, self._probe_period)
-        self.add_timeout(probe, self._probe_period)
-
-    def ping_ok(self, respondent):
-        pass
-
-    def ping_fail(self, respondent):
-        self.not_responding(respondent)
-
-
-    # Not responding and error handlers
-    def not_responding(self, actor):
-        name = actor.name
-        logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
-                                                                    self._failure_timeout_period))
-
-
 class Stats:
 
     def __init__(self, event_name):
@@ -443,3 +347,99 @@ class MeasuredMixin(HookedMixin, Actor):
             print(stats)
         print(self.get_total_stats())
 
+
+class SupervisorMixin(Actor):
+
+    def __init__(self, loop, name, probe_period=30, timeout_period=10):
+        self._supervised_actors = set()
+
+        self._ping_q = set()
+        self._stop_q = set()
+
+        # Probe all supervised actors regularly with this time period in
+        # seconds
+        self._probe_period = probe_period
+
+        # Echo timeouts after this many seconds. Ie. this means the time period
+        # after which a supervised actor should be recognized as dead
+        self._failure_timeout_period = timeout_period
+
+        # Make sure that all actors are evaluated of one round of probing
+        # before next round of probing
+        if not self._failure_timeout_period * 2 < self._probe_period:
+            raise Exception("Timeout_period should be at most half the period of probe_period.")
+
+        self.stop_sent = False
+
+
+        super().__init__(loop, name)
+
+        self.get_loop().add_observer("start", self.init_probe_cycle)
+        self.add_handler("_error", self.error_received)
+
+    def supervise(self, actor):
+        if not isinstance(actor, MonitoredMixin):
+            raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
+                    format(actor.name))
+
+        self._supervised_actors.add(actor)
+        actor.set_supervisor(self)
+        actor.connect("_error", self, "_error")
+
+    def get_supervised(self):
+        return list(self._supervised_actors)
+
+    def broadcast(self, operation, msg):
+        for actor in self.get_supervised():
+            actor.send(operation, msg)
+
+    def error_received(self, error_context):
+        actor, error = error_context.actor, error_context.err
+        raise error
+
+    def all_stopped(self, msg):
+        pass
+
+    # Stopping
+    def stop_children(self):
+        if not self.stop_sent:
+            self.stop_sent = True
+
+            self.add_timeout(self.stop_check_fails, self._failure_timeout_period)
+            for actor in self.get_supervised():
+                actor.send("_stop", None, respond=(self, self.on_actor_stopped), urgent=True)
+
+    def stop_check_fails(self, _):
+        if len(self._stop_q) > 0:
+            self._stop_q = set()
+            print("Killing everything ungracefully!")
+        self.all_stopped()
+
+    def on_actor_stopped(self, actor):
+        self._stop_q.remove(actor)
+
+
+    # Supervisor processes
+    def init_probe_cycle(self):
+        def probe(_):
+            if not self.stop_sent:
+                self._ping_q.clear()
+                for actor in self._supervised_actors:
+                    self._ping_q.pose(actor, "_ping", None, urgent=True, timeout=self._failure_timeout_period)
+
+                # Loop pattern: repeat probing process
+                self.add_timeout(probe, self._probe_period)
+        self.add_timeout(probe, self._probe_period)
+
+    def ping_ok(self, respondent):
+        pass
+
+    def ping_fail(self, respondent):
+        self.not_responding(respondent)
+
+
+    # Not responding and error handlers
+    def not_responding(self, actor):
+        name = actor.name
+        logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
+                                                                    self._failure_timeout_period))
