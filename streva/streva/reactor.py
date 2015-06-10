@@ -24,9 +24,11 @@ NORMAL = 0
 
 class Cancellable:
 
+    nop = lambda: None
+
     def __init__(self, f):
         self.f = f
-        self.cleanup = lambda: None
+        self.cleanup = self.nop
         self.cancelled = False
         self.finished = False
 
@@ -201,7 +203,7 @@ class Reactor(Observable):
             # Timeouts are processed after normal events, so that urgent
             # messages are processed first
             while self._timeouts:
-                if self._timeouts[0].is_deactivated():
+                if self._timeouts[0].function.is_canceled():
                     heapq.heappop(self._timeouts)
                 elif self._timeouts[0].deadline <= self.now:
                     timeout = heapq.heappop(self._timeouts)

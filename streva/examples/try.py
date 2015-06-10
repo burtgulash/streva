@@ -16,7 +16,7 @@ class StopProduction(Exception):
 class Producer(MeasuredMixin, MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name)
+        super().__init__(reactor, name)
         self.out = self.make_port("out")
         self.count = 1
 
@@ -26,7 +26,7 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.add_timeout(self.produce, .01)
+        self.add_timeout(self.produce, .2)
 
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):

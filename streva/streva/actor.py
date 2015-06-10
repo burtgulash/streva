@@ -53,7 +53,7 @@ class Process:
             f.cancel()
 
     def stop(self):
-        self.call(self.flush, URGENT)
+        self.call(self.flush, schedule=URGENT)
         self.stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
@@ -68,6 +68,7 @@ class Process:
                 self._planned.remove(func)
             func.add_cleanup_f(cleanup)
 
+            self._planned.add(func)
             self._reactor.schedule(func, schedule)
 
 
@@ -128,10 +129,10 @@ class Actor(Process):
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
-                sender.add_callback("_response", callback, self, schedule)
+                sender._add_callback("_response", callback, self, schedule=schedule)
             f = resp_wrap
 
-        self._add_callback(operation, f, message, schedule)
+        self._add_callback(operation, f, message, schedule=schedule)
 
 
 class HookedMixin(Actor):
@@ -167,7 +168,7 @@ class HookedMixin(Actor):
             function(message)
             self.after_execute(execution_id, operation, function, message)
 
-        super()._add_callback(operation, hooked_function, message, schedule=NORMAL)
+        super()._add_callback(operation, hooked_function, message, schedule=schedule)
 
 
 class MonitoredMixin(Actor):
