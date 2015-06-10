@@ -25,6 +25,8 @@ NORMAL = 0
 
 class Event:
 
+    __slots__ = "function", "delayed", "deadline"
+
     def __init__(self, function, delay=None):
         self.function = function
         self.delayed = False

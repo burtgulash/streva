@@ -35,6 +35,8 @@ ERROR happened when actor  '{}.{}'  was sent message  '{}':
 
 class Cancellable:
 
+    __slots__ = "f", "cleanup", "cancelled", "finished"
+
     nop = lambda: None
 
     def __init__(self, f):
