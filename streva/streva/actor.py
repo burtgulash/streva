@@ -53,11 +53,15 @@ class Process:
             f.cancel()
 
     def stop(self):
-        self.call(self.flush, schedule=URGENT)
+        self.call(self._stop, schedule=URGENT)
+
+    def _stop(self):
+        self.flush()
         self.stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self.stopped or True:
+        # print("CALL", self, function)
+        if not self.stopped or True: # TODO remove or True
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
@@ -129,6 +133,7 @@ class Actor(Process):
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
+                sender._add_callback("_response", callback, None, schedule=schedule)
             f = resp_wrap
 
         self._add_callback(operation, f, message, schedule=schedule)
@@ -275,10 +280,13 @@ class SupervisorMixin(Actor):
                 self._stop_q.pose(actor, "_stop", None, urgent=True, timeout=self._failure_timeout_period)
 
     def stop_fail(self, actor):
+        print("STOP FAIL", actor)
         self.not_responding(actor)
-        self.stop_ok(None)
+        if self._stop_q.is_empty():
+            self.all_stopped(None)
 
     def stop_ok(self, actor):
+        print("STOP OK", actor)
         if self._stop_q.is_empty():
             self.all_stopped(None)
 

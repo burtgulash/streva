@@ -26,7 +26,7 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.add_timeout(self.produce, .2)
+        self.add_timeout(self.produce, .1)
 
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
@@ -42,7 +42,7 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor, name, timeout_period=0.5, probe_period=4)
+        super().__init__(reactor, name, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
         self.stopped = False
 

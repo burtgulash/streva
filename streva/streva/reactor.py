@@ -33,6 +33,7 @@ class Cancellable:
         self.finished = False
 
     def __call__(self):
+        print("__CALL__", self.f, self.cancelled)
         if not self.cancelled:
             self.f()
         self.cleanup()
