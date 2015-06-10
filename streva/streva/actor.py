@@ -126,7 +126,7 @@ class Actor(Process):
         self._add_callback(operation, f, message, URGENT if urgent else NORMAL)
 
 
-class HookedActor(Actor):
+class HookedMixin(Actor):
 
     class Id:
         pass
@@ -135,10 +135,10 @@ class HookedActor(Actor):
         super().__init__(reactor, name)
         self._operations_map = {}
 
-    def on_event_ok(self, event_id):
+    def before_execute(self, event_id):
         pass
 
-    def on_event_failed(self, event_id):
+    def after_execute(self, event_id):
         pass
 
     def get_event_name(self, event_id):
@@ -149,23 +149,20 @@ class HookedActor(Actor):
         event_id = id(self.Id())
 
         @wraps(function)
-        def try_wrap(self, message):
-            error = None
-            try:
-                function(message)
-            except Exception as err:
-                error = err
+        def hooked_function(message):
+            self._operations_map[event_id] = operation
 
-            if error is None:
-                self.on_event_ok(event_id)
-            else:
-                self.on_event_failed(event_id)
+            self.before_execute(event_id)
+            function(message)
+            self.after_execute(event_id)
 
-        self._operations_map[id_] = operation
+            del self._operations_map[event_id]
+
         super()._add_callback(operation, try_wrap, message, urgent)
 
 
-class MonitoredMixin(HookedActor):
+
+class MonitoredMixin(HookedMixin, Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
@@ -201,6 +198,22 @@ class MonitoredMixin(HookedActor):
         error = ErrorContext(self.name, event_name, event.message, error)
         self.error_out.send(event)
         self.on_error(error)
+
+    def _add_callback(self, operation, function, message, urgent=False):
+        @wraps(function)
+        def try_function(self, message):
+            error = None
+            try:
+                function(message)
+            except Exception as err:
+                error = err
+
+            if error is None:
+                self.on_event_ok()
+            else:
+                self.on_event_failed()
+
+        super()._add_callback(operation, try_function, message, urgent)
 
 
 
@@ -326,12 +339,12 @@ class Stats:
         self.total_time += other.total_time
 
 
-class MeasuredMixin(Actor):
+class MeasuredMixin(HookedActor):
 
     def __init__(self, reactor, name):
+        super().__init__(reactor, name)
         self._stats = {}
         self.last_updated = time.time()
-        super().__init__(reactor, name)
 
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
