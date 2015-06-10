@@ -34,13 +34,16 @@ ERROR happened when actor  '{}.{}'  was sent message  '{}':
 class Process:
 
     def __init__(self, reactor):
-        self._reactor = reactor
-        self._planned = set()
-        self._stopped = False
+        self._p_reactor = reactor
+        self._p_planned = set()
+        self._p_stopped = False
 
         # Set up reactor's lifecycle observation
-        self._reactor.add_observer("start", self.init)
-        self._reactor.add_observer("end", self.terminate)
+        self._p_reactor.add_observer("start", self.init)
+        self._p_reactor.add_observer("end", self.terminate)
+
+    def get_reactor(self):
+        return self._p_reactor
 
     def init(self):
         pass
@@ -49,7 +52,7 @@ class Process:
         pass
 
     def flush(self):
-        for f in self._planned:
+        for f in self._p_planned:
             f.cancel()
 
     def stop(self):
@@ -57,10 +60,10 @@ class Process:
 
     def _stop(self):
         self.flush()
-        self._stopped = True
+        self._p_stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self._stopped:
+        if not self._p_stopped:
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
@@ -68,11 +71,11 @@ class Process:
             func = Cancellable(baked)
 
             def cleanup():
-                self._planned.remove(func)
+                self._p_planned.remove(func)
             func.add_cleanup_f(cleanup)
 
-            self._planned.add(func)
-            self._reactor.schedule(func, schedule)
+            self._p_planned.add(func)
+            self._p_reactor.schedule(func, schedule)
 
 
 class Port:
@@ -97,14 +100,14 @@ class Actor(Process):
         super().__init__(reactor)
         self.name = name
 
-        self._handlers = {}
-        self._ports = {}
+        self._a_handlers = {}
+        self._a_ports = {}
 
     def add_handler(self, operation, handler):
-        self._handlers[operation] = handler
+        self._a_handlers[operation] = handler
 
     def add_port(self, port_name, port):
-        self._ports[port_name] = port
+        self._a_ports[port_name] = port
 
     def make_port(self, port_name):
         port = Port(port_name)
@@ -112,7 +115,7 @@ class Actor(Process):
         return port
 
     def connect(self, port_name, to_actor, to_operation):
-        port = self._ports[port_name]
+        port = self._a_ports[port_name]
         port._targets.append((to_actor, to_operation))
 
     def _add_callback(self, operation, function, message, schedule=NORMAL):
@@ -122,7 +125,7 @@ class Actor(Process):
         self._add_callback("_timeout", function, message, schedule=delay)
 
     def send(self, operation, message, respond=None, urgent=False):
-        handler = self._handlers[operation]
+        handler = self._a_handlers[operation]
         schedule = URGENT if urgent else NORMAL
 
         f = handler
@@ -142,7 +145,7 @@ class HookedMixin(Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
-        self._lock = threading.Lock()
+        self._hm_lock = threading.Lock()
 
     class Id:
         pass
@@ -162,7 +165,7 @@ class HookedMixin(Actor):
         # Because _add_callback is the only function, which is called from
         # another thread and method self.before_schedule can modify this
         # actor's state, we need to put it into critical section
-        with self._lock:
+        with self._hm_lock:
             self.before_schedule(execution_id, operation, function, message)
 
         @wraps(function)
@@ -248,7 +251,7 @@ class SupervisorMixin(Actor):
 
         super().__init__(reactor, name)
 
-        self._reactor.add_observer("start", self.init_probe_cycle)
+        self.get_reactor().add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
 
     def supervise(self, actor):
