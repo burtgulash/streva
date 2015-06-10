@@ -60,15 +60,17 @@ class Process:
         self.stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self.stopped or True: # TODO remove or True
+        if not self.stopped:
             @wraps(function)
             def baked():
+                print("START", func, self._planned)
                 function(*args, **kwargs)
 
             func = Cancellable(baked)
 
             def cleanup():
                 self._planned.remove(func)
+                print("END  ", func, self._planned)
             func.add_cleanup_f(cleanup)
 
             self._planned.add(func)

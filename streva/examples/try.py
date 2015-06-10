@@ -71,7 +71,7 @@ class Supervisor(SupervisorMixin, Actor):
             self.stop_children()
 
     def all_stopped(self, _):
-        self.stop()
+        # self.stop() TODO
         # End all action here
         self._reactor.stop()
 

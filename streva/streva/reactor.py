@@ -38,6 +38,9 @@ class Cancellable:
         self.cleanup()
         self.finished = True
 
+    def __repr__(self):
+        return "Cancellable({})".format(self.f)
+
     def add_cleanup_f(self, cleanup_f):
         self.cleanup = cleanup_f
 
@@ -202,14 +205,9 @@ class Reactor(Observable):
 
             # Timeouts are processed after normal events, so that urgent
             # messages are processed first
-            while self._timeouts:
-                if self._timeouts[0].function.is_canceled():
-                    heapq.heappop(self._timeouts)
-                elif self._timeouts[0].deadline <= self.now:
-                    timeout = heapq.heappop(self._timeouts)
-                    timeout.function()
-                else:
-                    break
+            while self._timeouts and self._timeouts[0].deadline <= self.now:
+                timeout = heapq.heappop(self._timeouts)
+                timeout.function()
 
 
 class Emperor:
