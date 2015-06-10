@@ -5,7 +5,6 @@ import time
 import traceback
 
 from streva.reactor import NORMAL, URGENT
-from streva.question import Questionnaire
 
 
 class ErrorContext:
@@ -166,12 +165,12 @@ class Actor(Process):
 
         f = handler
         if respond is not None:
-            sender, callback = respond
+            sender, respond_operation = respond
 
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
-                sender._add_callback("_response", callback, self, schedule=schedule)
+                sender.send(respond_operation, self, urgent=urgent)
             f = resp_wrap
 
         self._add_callback(operation, f, message, schedule=schedule)
@@ -375,7 +374,10 @@ class SupervisorMixin(Actor):
         super().__init__(loop, name)
 
         self.get_loop().add_observer("start", self.init_probe_cycle)
+
         self.add_handler("_error", self.error_received)
+        self.add_handler("_stop_received", self._stop_received)
+        self.add_handler("_pong", self._pong)
 
     def supervise(self, actor):
         if not isinstance(actor, MonitoredMixin):
@@ -408,9 +410,9 @@ class SupervisorMixin(Actor):
             self.add_timeout(self.stop_check_failures, self._failure_timeout_period)
             for actor in self.get_supervised():
                 self._stop_q.add(actor)
-                actor.send("_stop", None, respond=(self, self._stop_ok), urgent=True)
+                actor.send("_stop", None, respond=(self, "_stop_received"), urgent=True)
 
-    def _stop_ok(self, actor):
+    def _stop_received(self, actor):
         if actor in self._stop_q:
             self._stop_q.remove(actor)
             if len(self._stop_q) == 0:
@@ -420,7 +422,7 @@ class SupervisorMixin(Actor):
         if len(self._stop_q) > 0:
             self._stop_q = set()
             logging.warning("""Killing everything ungracefully!
-{} actors haven't responded to stop request in {} s.""".format(len(self._stop_q), 
+{} actors haven't responded to stop request in {} s.""".format(len(self._stop_q),
                                                                self._failure_timeout_period))
         self.all_stopped(None)
 
@@ -434,7 +436,7 @@ class SupervisorMixin(Actor):
                 self.add_timeout(self.ping_check_failures, self._failure_timeout_period)
                 for actor in self.get_supervised():
                     self._ping_q.add(actor)
-                    actor.send("_ping", None, respond=(self, self._pong), urgent=True)
+                    actor.send("_ping", None, respond=(self, "_pong"), urgent=True)
 
                 self.add_timeout(probe, self._probe_period)
         self.add_timeout(probe, self._probe_period)
