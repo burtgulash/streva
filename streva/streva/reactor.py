@@ -96,10 +96,10 @@ class Observable:
     def __init__(self):
         self._observers = {}
 
-    def notify(self, event_name, message):
+    def notify(self, event_name):
         if event_name in self._observers:
             for handler in self._observers[event_name]:
-                handler(message)
+                handler()
 
     def add_observer(self, event_name, handler):
         if event_name not in self._observers:
@@ -145,7 +145,7 @@ class Reactor(Observable):
         self._should_run = False
 
         # Flush the queue with empty message if it was waiting for a timeout
-        empty_event = Event(lambda _: None, None)
+        empty_event = Event(lambda: None)
         self.schedule(empty_event, NORMAL)
 
     def schedule(self, function, schedule):
@@ -153,7 +153,7 @@ class Reactor(Observable):
             event = Event(function, delay=schedule)
             heapq.heappush(self._timeouts, event)
         else:
-            ev = Event(function)
+            event = Event(function)
             if schedule < 0:
                 self._queue.enqueue(event, urgent=True)
             elif schedule == 0:
@@ -162,7 +162,7 @@ class Reactor(Observable):
                 raise ValueError("Schedule must be a number!.")
 
     def _run(self):
-        self.notify("start", None)
+        self.notify("start")
 
         if self.done_queue:
             try:
@@ -174,7 +174,7 @@ class Reactor(Observable):
         else:
             self._loop()
 
-        self.notify("end", None)
+        self.notify("end")
 
     def _loop(self):
         while self._should_run:
@@ -193,7 +193,7 @@ class Reactor(Observable):
                 # an event from the queue
                 pass
             else:
-                event.process()
+                event.function()
 
             # Timeouts are processed after normal events, so that urgent
             # messages are processed first
@@ -202,7 +202,7 @@ class Reactor(Observable):
                     heapq.heappop(self._timeouts)
                 elif self._timeouts[0].deadline <= self.now:
                     timeout = heapq.heappop(self._timeouts)
-                    timeout.process()
+                    timeout.function()
                 else:
                     break
 

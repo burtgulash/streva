@@ -4,7 +4,7 @@ import threading
 import time
 import traceback
 
-from streva.reactor import Event, NORMAL, URGENT
+from streva.reactor import Cancellable, NORMAL, URGENT
 from streva.question import Questionnaire
 
 
@@ -48,19 +48,28 @@ class Process:
     def terminate(self):
         pass
 
+    def flush(self):
+        for f in self._planned:
+            f.cancel()
+
     def after_cleanup(self):
         del self._planned[id_]
 
     def stop(self):
-        self.call(flush, URGENT)
+        self.call(self.flush, URGENT)
         self.stopped = True
 
-    def call(self, function, schedule=NORMAL, *args, **kwargs):
+    def call(self, function, *args, schedule=NORMAL, **kwargs):
         if not self.stopped:
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
+
             func = Cancellable(baked, self.after_cleanup)
+            def cleanup():
+                del self._planned[func]
+
+            func.
 
             self._reactor.schedule(func, schedule)
 
@@ -105,14 +114,15 @@ class Actor(Process):
         port = self._ports[port_name]
         port._targets.append((to_actor, to_operation))
 
-    def _add_callback(self, operation, function, message=None, schedule=NORMAL):
+    def _add_callback(self, operation, function, message, schedule=NORMAL):
         self.call(function, message, schedule=schedule)
 
     def add_timeout(self, function, delay, message=None):
         self._add_callback("_timeout", function, message, schedule=delay)
 
     def send(self, operation, message, respond=None, urgent=False):
-        handler = self._handlers[event_name]
+        handler = self._handlers[operation]
+        schedule = URGENT if urgent else NORMAL
 
         f = handler
         if respond is not None:
@@ -121,10 +131,10 @@ class Actor(Process):
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
-                sender.add_callback("_response", callback, self, URGENT)
+                sender.add_callback("_response", callback, self, schedule)
             f = resp_wrap
 
-        self._add_callback(operation, f, message, URGENT if urgent else NORMAL)
+        self._add_callback(operation, f, message, schedule)
 
 
 class HookedMixin(Actor):
@@ -145,14 +155,14 @@ class HookedMixin(Actor):
     def after_execute(self, execution_id, operation, function, message):
         pass
 
-    def _add_callback(self, operation, function, message, urgent=False):
+    def _add_callback(self, operation, function, message, schedule=NORMAL):
         execution_id = id(self.Id())
 
         # Because _add_callback is the only function, which is called from
         # another thread and method self.before_schedule can modify this
         # actor's state, we need to put it into critical section
         with self._lock:
-            self.before_schedule(self, execution_id, operation, function, message)
+            self.before_schedule(execution_id, operation, function, message)
 
         @wraps(function)
         def hooked_function(message):
@@ -160,7 +170,7 @@ class HookedMixin(Actor):
             function(message)
             self.after_execute(execution_id, operation, function, message)
 
-        super()._add_callback(operation, try_wrap, message, urgent)
+        super()._add_callback(operation, hooked_function, message, schedule=NORMAL)
 
 
 class MonitoredMixin(Actor):
@@ -168,11 +178,11 @@ class MonitoredMixin(Actor):
     """
 
     def __init__(self, reactor, name):
+        super().__init__(reactor, name)
         self.supervisor = None
 
         self.add_handler("_ping", self._on_ping)
         self.add_handler("_stop", self._on_stop)
-
         self.error_out = self.make_port("_error")
 
     def set_supervisor(self, supervisor):
@@ -193,9 +203,9 @@ class MonitoredMixin(Actor):
         if not self.is_supervised():
             raise err
 
-    def _add_callback(self, operation, function, message, urgent=False):
+    def _add_callback(self, operation, function, message, schedule=NORMAL):
         @wraps(function)
-        def try_function(self, message):
+        def try_function(message):
             error = None
             try:
                 function(message)
@@ -204,10 +214,10 @@ class MonitoredMixin(Actor):
 
             if error is not None:
                 error = ErrorContext(self.name, operation, message, error)
-                self.error_out.send(event)
+                self.error_out.send((self, error))
                 self.on_error(error)
 
-        super()._add_callback(operation, try_function, message, urgent)
+        super()._add_callback(operation, try_function, message, schedule)
 
 
 
@@ -257,7 +267,7 @@ class SupervisorMixin(Actor):
             actor.send(operation, msg)
 
     def error_received(self, error_message):
-        errored_event, error = error_message
+        actor, error = error_message
         raise error
 
     # Stopping
@@ -280,7 +290,7 @@ class SupervisorMixin(Actor):
 
 
     # Supervisor processes
-    def init_probe_cycle(self, msg):
+    def init_probe_cycle(self):
         def probe(_):
             if not self.stop_sent:
                 self._ping_q.clear()

@@ -20,7 +20,7 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
         self.out = self.make_port("out")
         self.count = 1
 
-    def init(self, _):
+    def init(self):
         self.add_timeout(self.produce, .00001)
 
     def produce(self, msg):
@@ -32,7 +32,7 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name)
+        super().__init__(reactor, name)
         self.add_handler("in", self.on_receive)
 
     def on_receive(self, msg):
@@ -42,12 +42,12 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 class Supervisor(SupervisorMixin, Actor):
 
     def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name, timeout_period=0.5, probe_period=4)
+        super().__init__(reactor, name, timeout_period=0.5, probe_period=4)
         self.add_handler("finish", self.finish)
         self.stopped = False
 
     def error_received(self, err):
-        errored_event, error = err
+        actor, error = err
         logging.exception(error)
         self.finish(None)
 
