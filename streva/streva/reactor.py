@@ -22,37 +22,6 @@ class Done(Exception):
 URGENT = -1
 NORMAL = 0
 
-class Cancellable:
-
-    nop = lambda: None
-
-    def __init__(self, f):
-        self.f = f
-        self.cleanup = self.nop
-        self.cancelled = False
-        self.finished = False
-
-    def __call__(self):
-        if not self.cancelled:
-            self.f()
-        self.cleanup()
-        self.finished = True
-
-    def __repr__(self):
-        return "Cancellable({})".format(self.f)
-
-    def add_cleanup_f(self, cleanup_f):
-        self.cleanup = cleanup_f
-
-    def cancel(self):
-        self.finished = True
-
-    def is_finished(self):
-        return self.finished
-    
-    def is_canceled(self):
-        return self.cancelled
-
 
 class Event:
 

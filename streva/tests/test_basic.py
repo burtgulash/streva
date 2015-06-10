@@ -19,7 +19,7 @@ class Producer(MonitoredMixin, Actor):
         self.out = self.make_port("out")
         self.count = 1
 
-    def init(self, _):
+    def init(self):
         self.add_timeout(self.produce, MARGINAL_DELAY)
 
     def produce(self, msg):
@@ -45,15 +45,15 @@ class Supervisor(SupervisorMixin, Actor):
         super().__init__(reactor=reactor, name=name, timeout_period=.1, probe_period=.5)
         self.stopped = False
 
-    def error_received(self, err):
-        errored_event, error = err
-        if isinstance(error, StopProduction):
+    def error_received(self, error_context):
+        error = error_context.err
+        if isinstance(error, StopProduction) and not self.stopped:
             self.stopped = True
             self.stop_children()
 
     def all_stopped(self, _):
-        self.stop()
-        self._reactor.stop()
+        self._stop()
+        self.get_reactor().stop()
 
 
 

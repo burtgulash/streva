@@ -46,8 +46,8 @@ class Supervisor(SupervisorMixin, Actor):
         self.add_handler("finish", self.finish)
         self.stopped = False
 
-    def error_received(self, err):
-        actor, error = err
+    def error_received(self, error_context):
+        error = error_context.error
         logging.exception(error)
         self.finish(None)
 
@@ -71,7 +71,7 @@ class Supervisor(SupervisorMixin, Actor):
             self.stop_children()
 
     def all_stopped(self, _):
-        # self.stop() TODO
+        self._stop()
         # End all action here
         self.get_reactor().stop()
 

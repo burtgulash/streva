@@ -4,16 +4,16 @@ import threading
 import time
 import traceback
 
-from streva.reactor import Cancellable, NORMAL, URGENT
+from streva.reactor import NORMAL, URGENT
 from streva.question import Questionnaire
 
 
 class ErrorContext(Exception):
 
-    def __init__(self, actor_name, event_name, message, err):
+    def __init__(self, actor, event_name, message, err):
         super().__init__(err)
 
-        self.actor_name = actor_name
+        self.actor = actor
         self.event_name = event_name
         self.message = message
         self.err = err
@@ -26,9 +26,41 @@ class ErrorContext(Exception):
         return """
 
 ERROR happened when actor  '{}.{}'  was sent message  '{}':
-{}""".format(self.actor_name, self.event_name,
+{}""".format(self.actor.name, self.event_name,
              str(self.message)[:30],
              self._exc_traceback(self.err))
+
+
+class Cancellable:
+
+    nop = lambda: None
+
+    def __init__(self, f):
+        self.f = f
+        self.cleanup = self.nop
+        self.cancelled = False
+        self.finished = False
+
+    def __call__(self):
+        if not self.cancelled:
+            self.f()
+        self.cleanup()
+        self.finished = True
+
+    def __repr__(self):
+        return "Cancellable({})".format(self.f)
+
+    def add_cleanup_f(self, cleanup_f):
+        self.cleanup = cleanup_f
+
+    def cancel(self):
+        self.finished = True
+
+    def is_finished(self):
+        return self.finished
+    
+    def is_canceled(self):
+        return self.cancelled
 
 
 class Process:
@@ -145,7 +177,7 @@ class HookedMixin(Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
-        self._hm_lock = threading.Lock()
+        self._h_lock = threading.Lock()
 
     class Id:
         pass
@@ -165,7 +197,7 @@ class HookedMixin(Actor):
         # Because _add_callback is the only function, which is called from
         # another thread and method self.before_schedule can modify this
         # actor's state, we need to put it into critical section
-        with self._hm_lock:
+        with self._h_lock:
             self.before_schedule(execution_id, operation, function, message)
 
         @wraps(function)
@@ -217,8 +249,8 @@ class MonitoredMixin(Actor):
                 error = err
 
             if error is not None:
-                error = ErrorContext(self.name, operation, message, error)
-                self.error_out.send((self, error))
+                error_context = ErrorContext(self, operation, message, error)
+                self.error_out.send(error_context)
                 self.on_error(error)
 
         super()._add_callback(operation, try_function, message, schedule)
@@ -270,8 +302,8 @@ class SupervisorMixin(Actor):
         for actor in self.get_supervised():
             actor.send(operation, msg)
 
-    def error_received(self, error_message):
-        actor, error = error_message
+    def error_received(self, error_context):
+        actor, error = error_context.actor, error_context.err
         raise error
 
     # Stopping
