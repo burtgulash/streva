@@ -2,7 +2,7 @@ import queue
 
 import streva.reactor
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
-from streva.reactor import Reactor, Emperor
+from streva.reactor import Loop, Emperor
 
 
 MARGINAL_DELAY = .000001
@@ -14,8 +14,8 @@ class StopProduction(Exception):
 
 class Producer(MonitoredMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self.out = self.make_port("out")
         self.count = 1
 
@@ -30,8 +30,8 @@ class Producer(MonitoredMixin, Actor):
 
 class Consumer(MonitoredMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self.add_handler("in", self.on_receive)
 
     def on_receive(self, msg):
@@ -41,8 +41,8 @@ class Consumer(MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor=reactor, name=name, timeout_period=.1, probe_period=.5)
+    def __init__(self, loop, name):
+        super().__init__(loop, name, timeout_period=.1, probe_period=.5)
         self.stopped = False
 
     def error_received(self, error_context):
@@ -53,24 +53,24 @@ class Supervisor(SupervisorMixin, Actor):
 
     def all_stopped(self, _):
         self.stop()
-        self.get_reactor().stop()
+        self.get_loop().stop()
 
 
 
 def test_count_to_100():
-    reactor = Reactor()
+    loop = Loop()
 
     # Define actors
-    producer = Producer(reactor, "producer")
-    consumer = Consumer(reactor, "consumer")
-    supervisor = Supervisor(reactor, "supervisor")
+    producer = Producer(loop, "producer")
+    consumer = Consumer(loop, "consumer")
+    supervisor = Supervisor(loop, "supervisor")
 
     producer.connect("out", consumer, "in")
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
     emp = Emperor()
-    emp.add_reactor(reactor)
+    emp.add_loop(loop)
 
     emp.start()
     emp.join()

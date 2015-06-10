@@ -97,7 +97,7 @@ class Observable:
             self._observers[event_name] = without_observer
 
 
-class Reactor(Observable):
+class Loop(Observable):
 
     def __init__(self):
         super().__init__()
@@ -188,23 +188,23 @@ class Emperor:
 
     def __init__(self):
         self.done_queue = queue.Queue()
-        self._reactors = set()
+        self._loops = set()
 
-    def add_reactor(self, reactor):
-        self._reactors.add(reactor)
-        reactor.synchronize(self.done_queue)
+    def add_loop(self, loop):
+        self._loops.add(loop)
+        loop.synchronize(self.done_queue)
 
     def start(self):
-        for reactor in self._reactors:
-            reactor.start()
+        for loop in self._loops:
+            loop.start()
 
     def stop(self):
-        for reactor in self._reactors:
-            reactor.stop()
+        for loop in self._loops:
+            loop.stop()
 
     def join(self):
-        for x in self._reactors:
-            reactor, sig = self.done_queue.get()
+        for x in self._loops:
+            loop, sig = self.done_queue.get()
             try:
                 raise sig
             except Done:

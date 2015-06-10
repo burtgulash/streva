@@ -62,24 +62,24 @@ class Cancellable:
 
     def is_finished(self):
         return self.finished
-    
+
     def is_canceled(self):
         return self.cancelled
 
 
 class Process:
 
-    def __init__(self, reactor):
-        self._p_reactor = reactor
+    def __init__(self, loop):
+        self._p_loop = loop
         self._p_planned = set()
         self._p_stopped = False
 
-        # Set up reactor's lifecycle observation
-        self._p_reactor.add_observer("start", self.init)
-        self._p_reactor.add_observer("end", self.terminate)
+        # Set up loop's lifecycle observation
+        self._p_loop.add_observer("start", self.init)
+        self._p_loop.add_observer("end", self.terminate)
 
-    def get_reactor(self):
-        return self._p_reactor
+    def get_loop(self):
+        return self._p_loop
 
     def init(self):
         pass
@@ -111,7 +111,7 @@ class Process:
             func.add_cleanup_f(cleanup)
 
             self._p_planned.add(func)
-            self._p_reactor.schedule(func, schedule)
+            self._p_loop.schedule(func, schedule)
 
 
 class Port:
@@ -132,8 +132,8 @@ class Port:
 
 class Actor(Process):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor)
+    def __init__(self, loop, name):
+        super().__init__(loop)
         self.name = name
 
         self._a_handlers = {}
@@ -179,8 +179,8 @@ class Actor(Process):
 
 class HookedMixin(Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self._h_lock = threading.Lock()
 
     class Id:
@@ -217,8 +217,8 @@ class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self.supervisor = None
 
         self.add_handler("_ping", self._on_ping)
@@ -263,7 +263,7 @@ class MonitoredMixin(Actor):
 
 class SupervisorMixin(Actor):
 
-    def __init__(self, reactor, name, probe_period=30, timeout_period=10):
+    def __init__(self, loop, name, probe_period=30, timeout_period=10):
         self._supervised_actors = set()
 
         self._ping_q = Questionnaire(self, ok=self.ping_ok, fail=self.ping_fail)
@@ -285,9 +285,9 @@ class SupervisorMixin(Actor):
         self.stop_sent = False
 
 
-        super().__init__(reactor, name)
+        super().__init__(loop, name)
 
-        self.get_reactor().add_observer("start", self.init_probe_cycle)
+        self.get_loop().add_observer("start", self.init_probe_cycle)
         self.add_handler("_error", self.error_received)
 
     def supervise(self, actor):
@@ -392,8 +392,8 @@ class MeasuredMixin(HookedMixin, Actor):
             self.planned_at = None
             self.started_at = None
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
 
         self.last_updated = time.time()
         self._stats = {}

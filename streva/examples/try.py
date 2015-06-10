@@ -6,7 +6,7 @@ import signal
 import threading
 
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
-from streva.reactor import Reactor, Emperor
+from streva.reactor import Loop, Emperor
 
 
 class StopProduction(Exception):
@@ -15,8 +15,8 @@ class StopProduction(Exception):
 
 class Producer(MeasuredMixin, MonitoredMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self.out = self.make_port("out")
         self.count = 1
 
@@ -31,8 +31,8 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
         self.add_handler("in", self.on_receive)
 
     def on_receive(self, msg):
@@ -41,8 +41,8 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, Actor):
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name, timeout_period=1.0, probe_period=4.0)
+    def __init__(self, loop, name):
+        super().__init__(loop, name, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
         self.stopped = False
 
@@ -73,7 +73,7 @@ class Supervisor(SupervisorMixin, Actor):
     def all_stopped(self, _):
         self.stop()
         # End all action here
-        self.get_reactor().stop()
+        self.get_loop().stop()
 
         self.print_statistics()
 
@@ -87,14 +87,14 @@ def register_stop_signal(supervisor):
 
 
 if __name__ == "__main__":
-    reactor = Reactor()
+    loop = Loop()
 
     # Define actors
-    consumer = Consumer(reactor, "consumer")
-    producer = Producer(reactor, "producer")
+    consumer = Consumer(loop, "consumer")
+    producer = Producer(loop, "producer")
     producer.connect("out", consumer, "in")
 
-    supervisor = Supervisor(reactor, "supervisor")
+    supervisor = Supervisor(loop, "supervisor")
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     emp = Emperor()
-    emp.add_reactor(reactor)
+    emp.add_loop(loop)
 
     emp.start()
     emp.join()
