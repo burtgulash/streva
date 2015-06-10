@@ -333,12 +333,13 @@ class Stats:
         self.total_time += other.total_time
 
 
-class MeasuredMixin(HookedActor):
+class MeasuredMixin(HookedMixin, Actor):
 
     class Execution:
 
         def __init__(self):
-            self.started_ad = time.time()
+            self.planned_at = None
+            self.started_at = None
 
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
@@ -346,6 +347,34 @@ class MeasuredMixin(HookedActor):
         self.last_updated = time.time()
         self._stats = {}
         self._hooked_events = {}
+
+    def before_schedule(self, execution_id, operation, function, message):
+        if operation not in self._stats:
+            self._stats[operation] = Stats(operation)
+
+        execution = self.Execution()
+        execution.planned_at = time.time()
+
+        self._hooked_events[execution_id] = execution
+
+    def before_execute(self, execution_id, operation, function, message):
+        self._hooked_events[execution_id].started_at = time.time()
+
+    def after_execute(self, execution_id, operation, function, message):
+        assert operation in self._stats
+        assert execution_id in self._hooked_events
+
+        now = time.time()
+
+        stats = self._stats[operation]
+        execution = self._hooked_events[execution_id]
+
+        stats.runs += 1
+        stats.processing_time += now - execution.started_at
+        stats.total_time += now - execution.planned_at
+        stats.waiting_time = stats.total_time - stats.processing_time
+
+        self.last_updated = now
 
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
@@ -362,46 +391,4 @@ class MeasuredMixin(HookedActor):
         for name, stats in self.get_stats():
             print(stats)
         print(self.get_total_stats())
-
-    def before_schedule(self, execution_id, operation, function, message):
-        if operation not in self._stats:
-            self._stats[operation] = Stats(event_name)
-
-        self._hooked_events[execution_id] = self.Execution()
-
-    def before_execute(self, execution_id, operation, function, message):
-        self._hooked_events[event_id] = self.Execution
-        self._collect_statistics(operation)
-
-    def _after_processed(self, execution_id, operation, function, message):
-        event_name = self.get_event_name(event)
-        super()._after_processed(event)
-        self._collect_statistics(event_name, event)
-
-    def make_event(self, function, message, delay=None):
-        return self.MeasuredEvent(function, message, delay=delay)
-
-    def _collect_statistics(self, operation):
-        stats = self._stats[event_name]
-        now = time.time()
-
-        stats.runs += 1
-        stats.processing_time += now - event.processing_started_at
-        stats.total_time += now - event.created_at
-        stats.waiting_time = stats.total_time - stats.processing_time
-
-        self.last_updated = now
-
-
-    class MeasuredEvent(Event):
-
-        def __init__(self, function, message, delay=None):
-            super().__init__(function, message, delay=delay)
-
-            self.created_at = time.time()
-            self.processing_started_at = None
-
-        def process(self):
-            self.processing_started_at = time.time()
-            Event.process(self)
 
