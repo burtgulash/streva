@@ -57,7 +57,7 @@ class Process:
         self.stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self.stopped:
+        if not self.stopped or True:
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
@@ -129,7 +129,6 @@ class Actor(Process):
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
-                sender._add_callback("_response", callback, self, schedule=schedule)
             f = resp_wrap
 
         self._add_callback(operation, f, message, schedule=schedule)
