@@ -47,7 +47,7 @@ class Process:
     def terminate(self):
         pass
 
-    def cleanup(self):
+    def after_cleanup(self):
         del self._planned[id_]
 
     def stop(self):
@@ -61,34 +61,14 @@ class Process:
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
-            func = Cancellable(baked, self.cleanup)
+            func = Cancellable(baked, self.after_cleanup)
 
             self._reactor.schedule(func, schedule)
+            return id_
+        return None
 
     class Id:
         pass
-
-
-
-
-
-
-
-
-    def register_event(self, event, schedule):
-        self._events_planned.add(event)
-
-        # Extract the function from object first, otherwise it would be
-        # evaluated when the function is likely changed
-        f = event._function
-
-        @wraps(f)
-        def wrap(message):
-            self._callback(f, event.message, event)
-            self._after_processed(event)
-
-        event._function = wrap
-        self._reactor.schedule(event, schedule)
 
 
 class Port:
@@ -116,9 +96,8 @@ class Actor(Process):
         self._handlers = {}
         self._ports = {}
 
-    # Actor construction and setup methods
-    def add_handler(self, event_name, handler):
-        self._handlers[event_name] = handler
+    def add_handler(self, operation, handler):
+        self._handlers[operation] = handler
 
     def add_port(self, port_name, port):
         self._ports[port_name] = port
@@ -128,21 +107,17 @@ class Actor(Process):
         self.add_port(port_name, port)
         return port
 
-    def connect(self, port_name, to_actor, to_event_name):
+    def connect(self, port_name, to_actor, to_operation):
         port = self._ports[port_name]
-        port._targets.append((to_actor, to_event_name))
-    
-    def make_event(self, message):
+        port._targets.append((to_actor, to_operation))
 
-    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
-        event = self.make_event(function, message)
-        self.register_event(event, event_name, schedule)
+    def _add_callback(self, operation, function, message=None, schedule=NORMAL):
+        return self.call(function, message, schedule=schedule)
 
     def add_timeout(self, function, delay, message=None):
-        self.add_callback("_timeout", function, message, schedule=delay)
+        return self._add_callback("_timeout", function, message, schedule=delay)
 
-
-    def send(self, event_name, message, respond=None, urgent=False):
+    def send(self, operation, message, respond=None, urgent=False):
         handler = self._handlers[event_name]
 
         f = handler
@@ -155,7 +130,7 @@ class Actor(Process):
                 sender.add_callback("_response", callback, self, URGENT)
             f = resp_wrap
 
-        self.add_callback(event_name, f, message, URGENT if urgent else NORMAL)
+        return self._add_callback(operation, f, message, URGENT if urgent else NORMAL)
 
 
 class MonitoredMixin(Actor):
@@ -164,7 +139,7 @@ class MonitoredMixin(Actor):
 
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
-        self._event_map = {}
+        self._operations_map = {}
         self.supervisor = None
 
         self.add_handler("_ping", self._on_ping)
@@ -190,41 +165,30 @@ class MonitoredMixin(Actor):
         if not self.is_supervised():
             raise err
 
-    def _err(self, error_message):
-        errored_event, error = error_message
-        event_name = self.get_event_name(errored_event)
-
-        error = ErrorContext(self.name, event_name, errored_event.message, error)
-        self.error_out.send(error_message)
-        self.on_error(error)
-
-    def _ok(self, event):
-        assert event in self._event_map
-        pass
-
-    def register_event(self, event, event_name, schedule):
-        self._event_map[event] = event_name
-        super().register_event(event, event_name, schedule)
-
-    def _callback(self, function, message, event):
-        e = None
-        try:
-            function(message)
-        except Exception as err:
-            e = err
-
-        if e is None:
-            self._ok(event)
-        else:
-            self._err((event, e))
-
-    def _after_processed(self, event):
-        super()._after_processed(event)
-        del self._event_map[event]
-
     def get_event_name(self, event):
-        assert event in self._event_map
-        return self._event_map[event]
+        assert event in self._operations_map
+        return self._operations_map[event]
+
+    def _add_callback(self, operation, function, message, urgent=False):
+        @wraps(function)
+        def try_wrap(self, message):
+            error = None
+            try:
+                function(message)
+            except Exception as err:
+                error = err
+
+            if error is None:
+                assert event in self._event_map
+            else:
+                event_name = self.get_event_name(event)
+
+                error = ErrorContext(self.name, event_name, event.message, error)
+                self.error_out.send(event)
+                self.on_error(error)
+
+        id_ = super()._add_callback(operation, try_wrap, message, urgent)
+        self._operations_map[id_] = operation
 
 
 class SupervisorMixin(Actor):
