@@ -36,7 +36,7 @@ class Process:
     def __init__(self, reactor):
         self._reactor = reactor
         self._planned = set()
-        self.stopped = False
+        self._stopped = False
 
         # Set up reactor's lifecycle observation
         self._reactor.add_observer("start", self.init)
@@ -57,20 +57,18 @@ class Process:
 
     def _stop(self):
         self.flush()
-        self.stopped = True
+        self._stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self.stopped:
+        if not self._stopped:
             @wraps(function)
             def baked():
-                print("START", func, self._planned)
                 function(*args, **kwargs)
 
             func = Cancellable(baked)
 
             def cleanup():
                 self._planned.remove(func)
-                print("END  ", func, self._planned)
             func.add_cleanup_f(cleanup)
 
             self._planned.add(func)

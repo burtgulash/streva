@@ -65,6 +65,9 @@ class Event:
             self.delayed = True
             self.deadline += delay
 
+    def __repr__(self):
+        return "Event({})".format(self.function)
+
     def is_delayed(self):
         return self.delayed
 
