@@ -56,19 +56,12 @@ class Process:
 
     def call(self, function, schedule=NORMAL, *args, **kwargs):
         if not self.stopped:
-            id_ = self.Id()
-
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
             func = Cancellable(baked, self.after_cleanup)
 
             self._reactor.schedule(func, schedule)
-            return id_
-        return None
-
-    class Id:
-        pass
 
 
 class Port:
@@ -112,10 +105,10 @@ class Actor(Process):
         port._targets.append((to_actor, to_operation))
 
     def _add_callback(self, operation, function, message=None, schedule=NORMAL):
-        return self.call(function, message, schedule=schedule)
+        self.call(function, message, schedule=schedule)
 
     def add_timeout(self, function, delay, message=None):
-        return self._add_callback("_timeout", function, message, schedule=delay)
+        self._add_callback("_timeout", function, message, schedule=delay)
 
     def send(self, operation, message, respond=None, urgent=False):
         handler = self._handlers[event_name]
@@ -130,16 +123,53 @@ class Actor(Process):
                 sender.add_callback("_response", callback, self, URGENT)
             f = resp_wrap
 
-        return self._add_callback(operation, f, message, URGENT if urgent else NORMAL)
+        self._add_callback(operation, f, message, URGENT if urgent else NORMAL)
 
 
-class MonitoredMixin(Actor):
-    """ Allows the Actor object to be monitored by supervisors.
-    """
+class HookedActor(Actor):
+
+    class Id:
+        pass
 
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
         self._operations_map = {}
+
+    def on_event_ok(self, event_id):
+        pass
+
+    def on_event_failed(self, event_id):
+        pass
+
+    def get_event_name(self, event_id):
+        assert event_id in self._operations_map
+        return self._operations_map[event_id]
+
+    def _add_callback(self, operation, function, message, urgent=False):
+        event_id = id(self.Id())
+
+        @wraps(function)
+        def try_wrap(self, message):
+            error = None
+            try:
+                function(message)
+            except Exception as err:
+                error = err
+
+            if error is None:
+                self.on_event_ok(event_id)
+            else:
+                self.on_event_failed(event_id)
+
+        self._operations_map[id_] = operation
+        super()._add_callback(operation, try_wrap, message, urgent)
+
+
+class MonitoredMixin(HookedActor):
+    """ Allows the Actor object to be monitored by supervisors.
+    """
+
+    def __init__(self, reactor, name):
         self.supervisor = None
 
         self.add_handler("_ping", self._on_ping)
@@ -165,30 +195,13 @@ class MonitoredMixin(Actor):
         if not self.is_supervised():
             raise err
 
-    def get_event_name(self, event):
-        assert event in self._operations_map
-        return self._operations_map[event]
+    def on_event_failed(self, event_id):
+        event_name = self.get_event_name(event)
 
-    def _add_callback(self, operation, function, message, urgent=False):
-        @wraps(function)
-        def try_wrap(self, message):
-            error = None
-            try:
-                function(message)
-            except Exception as err:
-                error = err
+        error = ErrorContext(self.name, event_name, event.message, error)
+        self.error_out.send(event)
+        self.on_error(error)
 
-            if error is None:
-                assert event in self._event_map
-            else:
-                event_name = self.get_event_name(event)
-
-                error = ErrorContext(self.name, event_name, event.message, error)
-                self.error_out.send(event)
-                self.on_error(error)
-
-        id_ = super()._add_callback(operation, try_wrap, message, urgent)
-        self._operations_map[id_] = operation
 
 
 class SupervisorMixin(Actor):
@@ -232,9 +245,9 @@ class SupervisorMixin(Actor):
     def get_supervised(self):
         return list(self._supervised_actors)
 
-    def broadcast(self, event_name, msg):
+    def broadcast(self, operation, msg):
         for actor in self.get_supervised():
-            actor.send(event_name, msg)
+            actor.send(operation, msg)
 
     def error_received(self, error_message):
         errored_event, error = error_message
