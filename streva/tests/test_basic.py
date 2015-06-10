@@ -2,7 +2,7 @@ import queue
 
 import streva.reactor
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
-from streva.reactor import Loop, Emperor
+from streva.reactor import TimedLoop, Emperor
 
 
 MARGINAL_DELAY = .000001
@@ -58,7 +58,7 @@ class Supervisor(SupervisorMixin, Actor):
 
 
 def test_count_to_100():
-    loop = Loop()
+    loop = TimedLoop()
 
     # Define actors
     producer = Producer(loop, "producer")

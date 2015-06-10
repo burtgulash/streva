@@ -6,7 +6,7 @@ import signal
 import threading
 
 from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
-from streva.reactor import Loop, Emperor
+from streva.reactor import TimedLoop, Emperor
 
 
 class StopProduction(Exception):
@@ -87,7 +87,7 @@ def register_stop_signal(supervisor):
 
 
 if __name__ == "__main__":
-    loop = Loop()
+    loop = TimedLoop()
 
     # Define actors
     consumer = Consumer(loop, "consumer")

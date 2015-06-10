@@ -107,10 +107,6 @@ class Loop(Observable):
 
         # Scheduling
         self._queue = UrgentQueue()
-        # To avoid busy waiting, wait this number of seconds if there is no
-        # task or timeout to process in an iteration.
-        self._WAIT_ON_EMPTY = .5
-        self._timeouts = []
 
         # Running
         self._thread = None
@@ -131,21 +127,17 @@ class Loop(Observable):
         self.schedule(empty_event, NORMAL)
 
     def schedule(self, function, schedule):
-        if schedule > 0:
-            event = Event(function, delay=schedule)
-            heapq.heappush(self._timeouts, event)
+        event = Event(function)
+        if schedule < 0:
+            self._queue.enqueue(event, urgent=True)
+        elif schedule == 0:
+            self._queue.enqueue(event)
+        elif schedule > 0:
+            raise ValueError("This loop can not schedule delayed events!")
         else:
-            event = Event(function)
-            if schedule < 0:
-                self._queue.enqueue(event, urgent=True)
-            elif schedule == 0:
-                self._queue.enqueue(event)
-            else:
-                raise ValueError("Schedule must be a number!.")
+            raise ValueError("Schedule must be a number!.")
 
     def _run(self):
-        self.notify("start")
-
         if self.done_queue:
             try:
                 self._loop()
@@ -156,32 +148,59 @@ class Loop(Observable):
         else:
             self._loop()
 
+    def _loop(self):
+        self.notify("start")
+        while self._should_run:
+            self._iteration()
         self.notify("end")
 
-    def _loop(self):
-        while self._should_run:
-            self.now = time.time()
+    def _iteration(self):
+        event = self._queue.dequeue(block=True)
+        event.function()
 
-            timeout = self._WAIT_ON_EMPTY
-            # Find timeout - time to nearest scheduled timeout or default
-            # to WAIT_ON_EMPTY queue period
-            if self._timeouts:
-                timeout = max(0, self._timeouts[0].deadline - self.now)
 
-            try:
-                event = self._queue.dequeue(timeout=timeout)
-            except queue.Empty:
-                # Timeout obtained means that a timeout event came before
-                # an event from the queue
-                pass
-            else:
-                event.function()
 
-            # Timeouts are processed after normal events, so that urgent
-            # messages are processed first
-            while self._timeouts and self._timeouts[0].deadline <= self.now:
-                timeout = heapq.heappop(self._timeouts)
-                timeout.function()
+class TimedLoop(Loop):
+
+    def __init__(self):
+        super().__init__()
+
+        # To avoid busy waiting, wait this number of seconds if there is no
+        # task or timeout to process in an iteration.
+        self._WAIT_ON_EMPTY = .5
+        self._timeouts = []
+
+    def schedule(self, function, schedule):
+        if schedule > 0:
+            event = Event(function, delay=schedule)
+            heapq.heappush(self._timeouts, event)
+        else:
+            super().schedule(function, schedule)
+
+    def _iteration(self):
+        now = time.time()
+
+        timeout = self._WAIT_ON_EMPTY
+        # Find timeout - time to nearest scheduled timeout or default
+        # to WAIT_ON_EMPTY queue period
+        if self._timeouts:
+            timeout = max(0, self._timeouts[0].deadline - now)
+
+        try:
+            event = self._queue.dequeue(timeout=timeout)
+        except queue.Empty:
+            # Timeout obtained means that a timeout event came before
+            # an event from the queue
+            pass
+        else:
+            event.function()
+
+        # Timeouts are processed after normal events, so that urgent
+        # messages are processed first
+        while self._timeouts and self._timeouts[0].deadline <= now:
+            timeout = heapq.heappop(self._timeouts)
+            timeout.function()
+
 
 
 class Emperor:
