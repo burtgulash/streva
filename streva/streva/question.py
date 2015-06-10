@@ -23,7 +23,6 @@ class Questionnaire:
         self._register_failure_timeout(respondent, timeout)
 
     def _response_callback(self, msg):
-        print("RESPONDING SUCCESS")
         respondent = msg
         if respondent in self.respondents:
             self.respondents.remove(respondent)
@@ -31,7 +30,6 @@ class Questionnaire:
 
     def _register_failure_timeout(self, respondent, timeout):
         def expect_failure(_):
-            print("RESPONDING FAILURE")
             if respondent in self.respondents:
                 self.respondents.remove(respondent)
                 self._fail(respondent)
