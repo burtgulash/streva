@@ -9,9 +9,9 @@ from streva.reactor import NORMAL, URGENT
 
 class ErrorContext:
 
-    def __init__(self, actor, event_name, message, error):
+    def __init__(self, actor, operation, message, error):
         self.actor = actor
-        self.event_name = event_name
+        self.operation = operation
         self.message = message
         self.error = error
 
@@ -27,7 +27,7 @@ class ErrorContext:
         return """
 
 ERROR happened when actor  '{}.{}'  was sent message  '{}':
-{}""".format(self.actor.name, self.event_name,
+{}""".format(self.actor.name, self.operation,
              str(self.message)[:30],
              self._exc_traceback())
 
@@ -125,8 +125,8 @@ class Port:
         self._targets = []
 
     def send(self, message):
-        for target_actor, event_name in self._targets:
-            target_actor.send(event_name, message)
+        for target_actor, operation in self._targets:
+            target_actor.send(operation, message)
 
 
 class Actor(Process):
@@ -261,30 +261,43 @@ class MonitoredMixin(Actor):
 
 class Stats:
 
-    def __init__(self, event_name):
-        self.event_name = event_name
+    class StatType:
+
+        def __init__(self, type_name):
+            self.type_name = type_name
+            self.value = 0
+
+        def avg(self, runs):
+            return self.value / runs if runs else 0
+
+        def add(self, value):
+            self.value += value
+
+
+
+    def __init__(self, operation):
+        self.operation = operation
         self.runs = 0
-        self.processing_time = 0
-        self.waiting_time = 0
-        self.total_time = 0
+        self.processing_time = self.StatType("processing time")
+        self.waiting_time = self.StatType("waiting time")
+        self.total_time = self.StatType("total time")
+
+        self.time_types = self.processing_time, self.waiting_time, self.total_time
 
     def __str__(self):
-        avg_processing = self.processing_time / self.runs if self.runs else 0
-        avg_waiting = self.waiting_time / self.runs if self.runs else 0
-        avg_total = self.total_time / self.runs if self.runs else 0
+        s = ["    {:22} {:.4f}[s] / {} = {:.4f}[s]".format(x.type_name.capitalize(),
+                                                           x.value,
+                                                           self.runs,
+                                                           x.avg(self.runs))
+             for x
+             in self.time_types]
 
-        return \
-"""+ {}
-    Processing time:  {:.4f}[s] / {} = {:.4f}[s]
-    Proc+Wait time:   {:.4f}[s] / {} = {:.4f}[s]""".format(self.event_name,
-           self.processing_time, self.runs, avg_processing,
-           self.total_time, self.runs, avg_total)
+        return "+ {}\n{}".format(self.operation, "\n".join(s))
 
     def add(self, other):
         self.runs += other.runs
-        self.processing_time += other.processing_time
-        self.waiting_time += other.waiting_time
-        self.total_time += other.total_time
+        for a, b in zip(self.time_types, other.time_types):
+            a.add(b.value)
 
 
 class MeasuredMixin(HookedMixin, Actor):
@@ -324,25 +337,25 @@ class MeasuredMixin(HookedMixin, Actor):
         execution = self._hooked_events[execution_id]
 
         stats.runs += 1
-        stats.processing_time += now - execution.started_at
-        stats.total_time += now - execution.planned_at
-        stats.waiting_time = stats.total_time - stats.processing_time
+        stats.processing_time.add(now - execution.started_at)
+        stats.total_time.add(now - execution.planned_at)
+        stats.waiting_time.value = stats.total_time.value - stats.processing_time.value
 
         self.last_updated = now
 
     def get_stats(self):
-        return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
+        return [s for s in sorted(self._stats.values(), key=lambda x: x.runs)]
 
     def get_total_stats(self):
         total = Stats("Total")
-        for name, stats in self.get_stats():
+        for stats in self.get_stats():
             total.add(stats)
         return total
 
     def print_stats(self):
         print("\n# STATS for actor '{}':".format(self.name))
         print("sorted by number of runs. (total time[s]/runs = avg time[s])")
-        for name, stats in self.get_stats():
+        for stats in self.get_stats():
             print(stats)
         print(self.get_total_stats())
 

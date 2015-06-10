@@ -48,7 +48,7 @@ class Supervisor(SupervisorMixin, Actor):
 
     def error_received(self, error_context):
         error = error_context.error
-        logging.exception(error)
+        logging.error(str(error_context))
         self.finish(None)
 
     def print_statistics(self):
