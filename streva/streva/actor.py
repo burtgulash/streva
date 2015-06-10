@@ -8,18 +8,20 @@ from streva.reactor import NORMAL, URGENT
 from streva.question import Questionnaire
 
 
-class ErrorContext(Exception):
+class ErrorContext:
 
-    def __init__(self, actor, event_name, message, err):
-        super().__init__(err)
-
+    def __init__(self, actor, event_name, message, error):
         self.actor = actor
         self.event_name = event_name
         self.message = message
-        self.err = err
+        self.error = error
 
-    def _exc_traceback(self, err):
-        exc_info = type(err), err, err.__traceback__
+    def get_exception(self):
+        return self.error
+
+    def _exc_traceback(self):
+        error = self.error
+        exc_info = type(error), error, error.__traceback__
         return "".join(traceback.format_exception(*exc_info))
 
     def __str__(self):
@@ -28,7 +30,7 @@ class ErrorContext(Exception):
 ERROR happened when actor  '{}.{}'  was sent message  '{}':
 {}""".format(self.actor.name, self.event_name,
              str(self.message)[:30],
-             self._exc_traceback(self.err))
+             self._exc_traceback())
 
 
 class Cancellable:

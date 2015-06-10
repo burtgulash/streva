@@ -46,7 +46,7 @@ class Supervisor(SupervisorMixin, Actor):
         self.stopped = False
 
     def error_received(self, error_context):
-        error = error_context.err
+        error = error_context.get_exception()
         if isinstance(error, StopProduction) and not self.stopped:
             self.stopped = True
             self.stop_children()
