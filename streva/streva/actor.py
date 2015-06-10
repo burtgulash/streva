@@ -405,41 +405,47 @@ class SupervisorMixin(Actor):
         if not self.stop_sent:
             self.stop_sent = True
 
-            self.add_timeout(self.stop_check_fails, self._failure_timeout_period)
+            self.add_timeout(self.stop_check_failures, self._failure_timeout_period)
             for actor in self.get_supervised():
-                actor.send("_stop", None, respond=(self, self.on_actor_stopped), urgent=True)
+                self._stop_q.add(actor)
+                actor.send("_stop", None, respond=(self, self._stop_ok), urgent=True)
 
-    def stop_check_fails(self, _):
+    def _stop_ok(self, actor):
+        if actor in self._stop_q:
+            self._stop_q.remove(actor)
+            if len(self._stop_q) == 0:
+                self.all_stopped(None)
+
+    def stop_check_failures(self, _):
         if len(self._stop_q) > 0:
             self._stop_q = set()
-            print("Killing everything ungracefully!")
-        self.all_stopped()
+            logging.warning("""Killing everything ungracefully!
+{} actors haven't responded to stop request in {} s.""".format(len(self._stop_q), 
+                                                               self._failure_timeout_period))
+        self.all_stopped(None)
 
-    def on_actor_stopped(self, actor):
-        self._stop_q.remove(actor)
 
-
-    # Supervisor processes
+    # Supervisor ping process
     def init_probe_cycle(self):
         def probe(_):
             if not self.stop_sent:
-                self._ping_q.clear()
-                for actor in self._supervised_actors:
-                    self._ping_q.pose(actor, "_ping", None, urgent=True, timeout=self._failure_timeout_period)
+                self._ping_q = set()
 
-                # Loop pattern: repeat probing process
+                self.add_timeout(self.ping_check_failures, self._failure_timeout_period)
+                for actor in self.get_supervised():
+                    self._ping_q.add(actor)
+                    actor.send("_ping", None, respond=(self, self._pong), urgent=True)
+
                 self.add_timeout(probe, self._probe_period)
         self.add_timeout(probe, self._probe_period)
 
-    def ping_ok(self, respondent):
-        pass
+    def _pong(self, actor):
+        if actor in self._ping_q:
+            self._ping_q.remove(actor)
 
-    def ping_fail(self, respondent):
-        self.not_responding(respondent)
-
-
-    # Not responding and error handlers
-    def not_responding(self, actor):
-        name = actor.name
-        logging.error("Actor '{}' hasn't responded in {} seconds!".format(name,
+    def ping_check_failures(self, _):
+        for actor in self._ping_q:
+            self._ping_q.remove(actor)
+            logging.error("Actor '{}' hasn't responded in {} seconds!".format(actor.name,
                                                                     self._failure_timeout_period))
+
