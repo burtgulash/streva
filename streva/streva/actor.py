@@ -34,7 +34,7 @@ class Process:
 
     def __init__(self, reactor):
         self._reactor = reactor
-        self._events_planned = set()
+        self._planned = set()
 
         # Set up reactor's lifecycle observation
         self._reactor.add_observer("start", self.init)
@@ -68,17 +68,14 @@ class Process:
     def _after_processed(self, event):
         self._events_planned.remove(event)
 
-    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
-        event = self.make_event(function, message)
-        self.register_event(event, event_name, schedule)
+    def make_event(self, function, message):
+        return Event(function, message)
 
-    def add_timeout(self, function, delay, message=None):
-        self.add_callback("_timeout", function, message, schedule=delay)
+    def call(self, function, schedule=NORMAL, *args, **kwargs):
+        event = self.make_event(function, args, kwargs)
+        self.register_event(event, schedule)
 
-    def make_event(self, function, message, delay=None):
-        return Event(function, message, delay)
-
-    def register_event(self, event, event_name, schedule):
+    def register_event(self, event, schedule):
         self._events_planned.add(event)
 
         # Extract the function from object first, otherwise it would be
@@ -134,6 +131,16 @@ class Actor(Process):
     def connect(self, port_name, to_actor, to_event_name):
         port = self._ports[port_name]
         port._targets.append((to_actor, to_event_name))
+    
+    def make_event(self, message):
+
+    def add_callback(self, event_name, function, message=None, schedule=NORMAL):
+        event = self.make_event(function, message)
+        self.register_event(event, event_name, schedule)
+
+    def add_timeout(self, function, delay, message=None):
+        self.add_callback("_timeout", function, message, schedule=delay)
+
 
     def send(self, event_name, message, respond=None, urgent=False):
         handler = self._handlers[event_name]

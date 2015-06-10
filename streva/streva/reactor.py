@@ -22,6 +22,28 @@ class Done(Exception):
 URGENT = -1
 NORMAL = 0
 
+class Func:
+
+    def __init__(self, f, notify):
+        self.f = f
+        self.notify = notify
+        self.finished = False
+
+    def __call__(self):
+        if not self.finished:
+            self.f()
+            self.finished = True
+        self.notify()
+
+    def cancel(self):
+        self.finished = True
+
+    def is_finished(self):
+        return self.finished
+    
+    def is_canceled(self):
+        return self.finished
+
 class Event:
 
     def __init__(self, function, message, delay=None):
