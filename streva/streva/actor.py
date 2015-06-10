@@ -35,45 +35,45 @@ class Process:
     def __init__(self, reactor):
         self._reactor = reactor
         self._planned = set()
+        self.stopped = False
 
         # Set up reactor's lifecycle observation
         self._reactor.add_observer("start", self.init)
         self._reactor.add_observer("end", self.terminate)
 
-    def init(self, message):
+    def init(self):
         pass
 
-    def terminate(self, message):
+    def terminate(self):
         pass
+
+    def cleanup(self):
+        del self._planned[id_]
 
     def stop(self):
-        # Stop processing new events by clearing all handlers
-        self._handlers = {}
-
-        # Clear all planned events
-        return self.flush()
-
-    def flush(self):
-        flushed_messages = []
-
-        for event in self._events_planned:
-            event.deactivate()
-            flushed_messages.append(event.message)
-
-        return flushed_messages
-
-    def _callback(self, function, message, event):
-        function(message)
-
-    def _after_processed(self, event):
-        self._events_planned.remove(event)
-
-    def make_event(self, function, message):
-        return Event(function, message)
+        self.call(flush, URGENT)
+        self.stopped = True
 
     def call(self, function, schedule=NORMAL, *args, **kwargs):
-        event = self.make_event(function, args, kwargs)
-        self.register_event(event, schedule)
+        if not self.stopped:
+            id_ = self.Id()
+
+            @wraps(function)
+            def baked():
+                function(*args, **kwargs)
+            func = Cancellable(baked, self.cleanup)
+
+            self._reactor.schedule(func, schedule)
+
+    class Id:
+        pass
+
+
+
+
+
+
+
 
     def register_event(self, event, schedule):
         self._events_planned.add(event)

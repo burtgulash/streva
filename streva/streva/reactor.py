@@ -22,18 +22,19 @@ class Done(Exception):
 URGENT = -1
 NORMAL = 0
 
-class Func:
+class Cancellable:
 
-    def __init__(self, f, notify):
+    def __init__(self, f, cleanup):
         self.f = f
-        self.notify = notify
+        self.cleanup = cleanup
+        self.cancelled = False
         self.finished = False
 
     def __call__(self):
-        if not self.finished:
+        if not self.cancelled:
             self.f()
-            self.finished = True
-        self.notify()
+        self.cleanup()
+        self.finished = True
 
     def cancel(self):
         self.finished = True
@@ -42,46 +43,22 @@ class Func:
         return self.finished
     
     def is_canceled(self):
-        return self.finished
+        return self.cancelled
+
 
 class Event:
 
-    def __init__(self, function, message, delay=None):
-        self.message = message
-        self._function = function
-        self._processed = False
+    def __init__(self, function, delay=None):
+        self.function = function
+        self.delayed = False
+        self.deadline = time.time()
 
-        self._delay = delay
-        self.deadline = None
+        if delay:
+            self.delayed = True
+            self.deadline += delay
 
-    def process(self):
-        if not self._processed:
-            self._function(self.message)
-        self._processed = True
-
-    def deactivate(self):
-        self._processed = True
-
-    def add_delay(self, delay):
-        self._delay = delay
-        if delay is not None:
-            self.deadline = time.time() + delay
-
-
-    def is_processed(self):
-        return bool(self._processed)
-
-    def is_deactivated(self):
-        return bool(self._processed)
-
-    def is_timeout(self):
-        return bool(self._delay)
-
-    def __repr__(self):
-        msg = str(self.message)[:30]
-        if self.is_timeout():
-            return "Delayed Event({}, {}, {})".format(self._function, msg, self._delay)
-        return "Event({}, {})".format(self._function, msg)
+    def is_delayed(self):
+        return self.delayed
 
     def __lt__(self, other):
         return self.deadline < other.deadline
@@ -171,19 +148,18 @@ class Reactor(Observable):
         empty_event = Event(lambda _: None, None)
         self.schedule(empty_event, NORMAL)
 
-    def schedule(self, event, schedule):
+    def schedule(self, function, schedule):
         if schedule > 0:
-            event.add_delay(schedule)
+            event = Event(function, delay=schedule)
             heapq.heappush(self._timeouts, event)
-        elif schedule < 0:
-            self._queue.enqueue(event, urgent=True)
-        elif schedule == 0:
-            self._queue.enqueue(event)
         else:
-            raise ValueError("Schedule must be a number!.")
-
-    def remove_event(self, event):
-        event.deactivate()
+            ev = Event(function)
+            if schedule < 0:
+                self._queue.enqueue(event, urgent=True)
+            elif schedule == 0:
+                self._queue.enqueue(event)
+            else:
+                raise ValueError("Schedule must be a number!.")
 
     def _run(self):
         self.notify("start", None)
