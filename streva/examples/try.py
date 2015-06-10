@@ -26,7 +26,7 @@ class Producer(MeasuredMixin, MonitoredMixin, Actor):
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.add_timeout(self.produce, .1)
+        self.add_timeout(self.produce, .01)
 
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
@@ -71,7 +71,7 @@ class Supervisor(SupervisorMixin, Actor):
             self.stop_children()
 
     def all_stopped(self, _):
-        self._stop()
+        self.stop()
         # End all action here
         self.get_reactor().stop()
 

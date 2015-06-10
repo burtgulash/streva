@@ -52,7 +52,7 @@ class Supervisor(SupervisorMixin, Actor):
             self.stop_children()
 
     def all_stopped(self, _):
-        self._stop()
+        self.stop()
         self.get_reactor().stop()
 
 

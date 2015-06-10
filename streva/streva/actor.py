@@ -89,10 +89,10 @@ class Process:
         for f in self._p_planned:
             f.cancel()
 
-    def stop(self):
-        self.call(self._stop, schedule=URGENT)
+    def send_stop(self):
+        self.call(self.stop, schedule=URGENT)
 
-    def _stop(self):
+    def stop(self):
         self.flush()
         self._p_stopped = True
 
@@ -233,7 +233,7 @@ class MonitoredMixin(Actor):
         pass
 
     def _on_stop(self, msg):
-        self.stop()
+        self.send_stop()
 
     def on_error(self, err):
         # If there is no supervisor attached, then don't just pass the error
