@@ -1,5 +1,6 @@
 from functools import wraps
 import logging
+import threading
 import time
 import traceback
 
@@ -128,41 +129,41 @@ class Actor(Process):
 
 class HookedMixin(Actor):
 
+    def __init__(self, reactor, name):
+        super().__init__(reactor, name)
+        self._lock = threading.Lock()
+
     class Id:
         pass
 
-    def __init__(self, reactor, name):
-        super().__init__(reactor, name)
-        self._operations_map = {}
-
-    def before_execute(self, event_id):
+    def before_schedule(self, execution_id, operation, function, message):
         pass
 
-    def after_execute(self, event_id):
+    def before_execute(self, execution_id, operation, function, message):
         pass
 
-    def get_event_name(self, event_id):
-        assert event_id in self._operations_map
-        return self._operations_map[event_id]
+    def after_execute(self, execution_id, operation, function, message):
+        pass
 
     def _add_callback(self, operation, function, message, urgent=False):
-        event_id = id(self.Id())
+        execution_id = id(self.Id())
+
+        # Because _add_callback is the only function, which is called from
+        # another thread and method self.before_schedule can modify this
+        # actor's state, we need to put it into critical section
+        with self._lock:
+            self.before_schedule(self, execution_id, operation, function, message)
 
         @wraps(function)
         def hooked_function(message):
-            self._operations_map[event_id] = operation
-
-            self.before_execute(event_id)
+            self.before_execute(execution_id, operation, function, message)
             function(message)
-            self.after_execute(event_id)
-
-            del self._operations_map[event_id]
+            self.after_execute(execution_id, operation, function, message)
 
         super()._add_callback(operation, try_wrap, message, urgent)
 
 
-
-class MonitoredMixin(HookedMixin, Actor):
+class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
@@ -192,13 +193,6 @@ class MonitoredMixin(HookedMixin, Actor):
         if not self.is_supervised():
             raise err
 
-    def on_event_failed(self, event_id):
-        event_name = self.get_event_name(event)
-
-        error = ErrorContext(self.name, event_name, event.message, error)
-        self.error_out.send(event)
-        self.on_error(error)
-
     def _add_callback(self, operation, function, message, urgent=False):
         @wraps(function)
         def try_function(self, message):
@@ -208,10 +202,10 @@ class MonitoredMixin(HookedMixin, Actor):
             except Exception as err:
                 error = err
 
-            if error is None:
-                self.on_event_ok()
-            else:
-                self.on_event_failed()
+            if error is not None:
+                error = ErrorContext(self.name, operation, message, error)
+                self.error_out.send(event)
+                self.on_error(error)
 
         super()._add_callback(operation, try_function, message, urgent)
 
@@ -341,10 +335,17 @@ class Stats:
 
 class MeasuredMixin(HookedActor):
 
+    class Execution:
+
+        def __init__(self):
+            self.started_ad = time.time()
+
     def __init__(self, reactor, name):
         super().__init__(reactor, name)
-        self._stats = {}
+
         self.last_updated = time.time()
+        self._stats = {}
+        self._hooked_events = {}
 
     def get_stats(self):
         return tuple(sorted(tuple(self._stats.items()), key=lambda t: t[1].runs))
@@ -362,12 +363,17 @@ class MeasuredMixin(HookedActor):
             print(stats)
         print(self.get_total_stats())
 
-    def register_event(self, event, event_name, schedule):
-        if event_name not in self._stats:
-            self._stats[event_name] = Stats(event_name)
-        super().register_event(event, event_name, schedule)
+    def before_schedule(self, execution_id, operation, function, message):
+        if operation not in self._stats:
+            self._stats[operation] = Stats(event_name)
 
-    def _after_processed(self, event):
+        self._hooked_events[execution_id] = self.Execution()
+
+    def before_execute(self, execution_id, operation, function, message):
+        self._hooked_events[event_id] = self.Execution
+        self._collect_statistics(operation)
+
+    def _after_processed(self, execution_id, operation, function, message):
         event_name = self.get_event_name(event)
         super()._after_processed(event)
         self._collect_statistics(event_name, event)
@@ -375,7 +381,7 @@ class MeasuredMixin(HookedActor):
     def make_event(self, function, message, delay=None):
         return self.MeasuredEvent(function, message, delay=delay)
 
-    def _collect_statistics(self, event_name, event):
+    def _collect_statistics(self, operation):
         stats = self._stats[event_name]
         now = time.time()
 
