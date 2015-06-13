@@ -17,12 +17,12 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
 
     def __init__(self, name):
         super().__init__(name)
-        self.out = self.add_handler("produce", self.produce)
         self.out = self.make_port("out")
 
         self.count = 1
         self.delay("produce", .00001)
 
+    @Actor.handler_for("produce")
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
@@ -31,10 +31,7 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
-    def __init__(self, name):
-        super().__init__(name)
-        self.add_handler("in", self.on_receive)
-
+    @Actor.handler_for("in")
     def on_receive(self, msg):
         logging.info("Count is: {}".format(msg))
 
@@ -43,7 +40,6 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
     def __init__(self, name, children=[]):
         super().__init__(name, children=children, timeout_period=1.0, probe_period=4.0)
-        self.add_handler("finish", self.finish)
         self.stopped = False
 
     def error_received(self, error_context):
@@ -65,6 +61,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
         print("\n--------------------------------------------------")
         print(bottomline)
 
+    @Actor.handler_for("finish")
     def finish(self, emperor):
         self.emperor = emperor
         if not self.stopped:
@@ -72,7 +69,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
             self.stop_children()
 
     def terminate(self):
-        self.print_statistics()
+        # self.print_statistics() # TODO
         self.emperor.stop()
 
 

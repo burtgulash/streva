@@ -191,6 +191,18 @@ class Port(Enablable):
 
 class Actor(Process):
 
+    # Make 'handler' decorator
+    cls_handlers = []
+    def handler(handlers):
+        def bake_in(operation=""):
+            def decorator(func):
+                handlers.append((operation, func))
+                return func
+            return decorator
+        return bake_in
+    handler_for = handler(cls_handlers)
+
+
     def __init__(self, name):
         super().__init__()
         self.name = name
@@ -198,7 +210,13 @@ class Actor(Process):
         self.__handlers = {}
         self.__ports = {}
 
+        # Add decorated handlers
+        for operation, handler in self.cls_handlers:
+            self.add_handler(operation, handler.__get__(self, type(self)))
+
     def add_handler(self, operation, handler):
+        if operation in self.__handlers:
+            raise ValueError("Handler for '{}' already exists!".format(operation))
         self.__handlers[operation] = handler
 
     def add_port(self, port_name, port):
