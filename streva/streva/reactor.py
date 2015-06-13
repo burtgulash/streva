@@ -147,10 +147,8 @@ class Loop(Observable):
             self._loop()
 
     def _loop(self):
-        self.notify("start")
         while self._should_run:
             self._iteration()
-        self.notify("end")
 
     def _iteration(self):
         event = self._queue.dequeue(block=True)

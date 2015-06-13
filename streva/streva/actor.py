@@ -69,49 +69,75 @@ class Cancellable:
 
 class Process:
 
-    def __init__(self, loop):
-        self.__loop = loop
+    def __init__(self):
+        self.__loop = None
+        self.__queued = []
         self.__planned = set()
         self.__stopped = False
-
-        # Set up loop's lifecycle observation
-        self.__loop.add_observer("start", self.init)
-        self.__loop.add_observer("end", self.terminate)
 
     def get_loop(self):
         return self.__loop
 
+    def set_loop(self, loop):
+        self.__loop = loop
+
+    def __queue_function(self, function, schedule):
+        self.__queued.append((function, schedule))
+        if self.__loop:
+            self.__schedule_all()
+
+    def __schedule_all(self):
+        for function, schedule in self.__queued:
+            self.__planned.add(function)
+            self.__loop.schedule(function, schedule)
+        self.__queued = []
+
     def init(self):
+        pass
+
+    def _init(self):
         pass
 
     def terminate(self):
         pass
 
+    def _terminate(self):
+        pass
+
     def flush(self):
+        self.__queued = []
         for f in self.__planned:
             f.cancel()
 
     def send_stop(self):
         self.call(self.stop, schedule=URGENT)
 
+    def start(self):
+        self._init()
+        self.init()
+        self.__schedule_all()
+
     def stop(self):
         self.flush()
         self.__stopped = True
+        self._terminate()
+        self.terminate()
 
     def call(self, function, *args, schedule=NORMAL, **kwds):
-        if not self.__stopped:
-            @wraps(function)
-            def baked():
-                function(*args, **kwds)
+        if self.__stopped:
+            return
 
-            func = Cancellable(baked)
+        @wraps(function)
+        def baked():
+            function(*args, **kwds)
 
-            def cleanup():
-                self.__planned.remove(func)
-            func.add_cleanup_f(cleanup)
+        func = Cancellable(baked)
 
-            self.__planned.add(func)
-            self.__loop.schedule(func, schedule)
+        def cleanup():
+            self.__planned.remove(func)
+        func.add_cleanup_f(cleanup)
+
+        self.__queue_function(func, schedule)
 
 
 class Port:
@@ -123,20 +149,23 @@ class Port:
 
     def __init__(self, name):
         self.name = name
-        self._targets = []
+        self.__targets = []
+
+    def add_target(self, actor, operation):
+        self.__targets.append((actor, operation))
 
     def send(self, message):
-        if not self._targets:
+        if not self.__targets:
             raise Exception("Empty targets of port {}!".format(self.name))
 
-        for target_actor, operation in self._targets:
+        for target_actor, operation in self.__targets:
             target_actor.send(operation, message)
 
 
 class Actor(Process):
 
-    def __init__(self, loop, name):
-        super().__init__(loop)
+    def __init__(self, name):
+        super().__init__()
         self.name = name
 
         self.__handlers = {}
@@ -155,7 +184,7 @@ class Actor(Process):
 
     def connect(self, port_name, to_actor, to_operation):
         port = self.__ports[port_name]
-        port._targets.append((to_actor, to_operation))
+        port.add_target(to_actor, to_operation)
 
     def _add_callback(self, operation, function, message, schedule=NORMAL):
         self.call(function, message, schedule=schedule)
@@ -179,8 +208,8 @@ class Actor(Process):
 
 class InterceptedMixin(Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.__intercept_lock = threading.Lock()
 
     class Id:
@@ -217,8 +246,8 @@ class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.supervisor = None
 
         self.add_handler("_ping", self.__on_ping)
@@ -262,11 +291,12 @@ class MonitoredMixin(Actor):
 
 class DelayableMixin(Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.__after_out = self.make_port("_after")
 
     def connect_timer(self, timer_actor):
+        print("CONNECTING", self, timer_actor)
         self.connect("_after", timer_actor, "_after")
 
     def delay(self, operation, after):
@@ -275,11 +305,14 @@ class DelayableMixin(Actor):
 
 class TimerMixin(Actor):
 
-    def __init__(self, loop, name):
+    def __init__(self, name):
+        super().__init__(name)
+        self.add_handler("_after", self.__after)
+
+    def set_loop(self, loop):
         if not isinstance(loop, TimedLoop):
             raise TypeError("Loop for TimerMixin must be TimedLoop instance!")
-        super().__init__(loop, name)
-        self.add_handler("_after", self.__after)
+        super().set_loop(loop)
 
     def add_timeout(self, callback, after, message=None):
         self._add_callback("_timeout", callback, message, schedule=after)
@@ -342,8 +375,8 @@ class MeasuredMixin(InterceptedMixin, Actor):
             self.planned_at = None
             self.started_at = None
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
 
         self.last_updated = time.time()
         self.__stats = {}
@@ -396,7 +429,7 @@ class MeasuredMixin(InterceptedMixin, Actor):
 
 class SupervisorMixin(DelayableMixin, Actor):
 
-    def __init__(self, loop, name, probe_period=30, timeout_period=10):
+    def __init__(self, name, probe_period=30, timeout_period=10):
         self.__supervised_actors = set()
 
         self.__ping_q = set()
@@ -418,9 +451,7 @@ class SupervisorMixin(DelayableMixin, Actor):
         self.stop_sent = False
 
 
-        super().__init__(loop, name)
-
-        self.get_loop().add_observer("start", self.init_probe_cycle)
+        super().__init__(name)
 
         self.add_handler("_error", self.error_received)
         self.add_handler("_stop_received", self._stop_received)
@@ -429,6 +460,9 @@ class SupervisorMixin(DelayableMixin, Actor):
         self.add_handler("_stop_check_failures", self.stop_check_failures)
         self.add_handler("_ping_check_failures", self.ping_check_failures)
         self.add_handler("_probe", self._probe)
+    
+    def _init(self):
+        self.delay("_probe", self.__probe_period)
 
     def supervise(self, actor):
         if not isinstance(actor, MonitoredMixin):
@@ -453,6 +487,10 @@ class SupervisorMixin(DelayableMixin, Actor):
     def all_stopped(self, msg):
         pass
 
+    def start_children(self):
+        for actor in self.get_supervised():
+            actor.start()
+
     # Stopping
     def stop_children(self):
         if not self.stop_sent:
@@ -476,10 +514,6 @@ class SupervisorMixin(DelayableMixin, Actor):
 {} actors haven't responded to stop request in {} s.""".format(len(self.__stop_q),
                                                                self.__failure_timeout_period))
         self.all_stopped(None)
-
-    # Supervisor ping process
-    def init_probe_cycle(self):
-        self.delay("_probe", self.__probe_period)
 
     def _probe(self, _):
         if not self.stop_sent:

@@ -15,8 +15,8 @@ class StopProduction(Exception):
 
 class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.out = self.add_handler("produce", self.produce)
         self.out = self.make_port("out")
         self.count = 1
@@ -32,8 +32,8 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.add_handler("in", self.on_receive)
 
     def on_receive(self, msg):
@@ -42,8 +42,8 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
-    def __init__(self, loop, name, emperor):
-        super().__init__(loop, name, timeout_period=1.0, probe_period=4.0)
+    def __init__(self, name, emperor):
+        super().__init__(name, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
         self.stopped = False
         self.emperor = emperor
@@ -95,11 +95,11 @@ if __name__ == "__main__":
     emp.add_loop(timer_loop)
 
     # Define actors
-    consumer = Consumer(loop, "consumer")
-    producer = Producer(loop, "producer")
+    consumer = Consumer("consumer")
+    producer = Producer("producer")
     producer.connect("out", consumer, "in")
 
-    supervisor = Supervisor(timer_loop, "supervisor", emp)
+    supervisor = Supervisor("supervisor", emp)
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
@@ -113,5 +113,13 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     emp.start()
+
+    consumer.set_loop(loop)
+    producer.set_loop(loop)
+    supervisor.set_loop(timer_loop)
+
+    supervisor.start()
+    supervisor.start_children()
+
     emp.join()
 
