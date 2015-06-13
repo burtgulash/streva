@@ -189,19 +189,17 @@ class Port(Enablable):
             self._enqueue(message)
 
 
+
+def handler_deco(handlers):
+    def bake_in(operation=""):
+        def decorator(func):
+            handlers.append((operation, func))
+            return func
+        return decorator
+    return bake_in
+
+
 class Actor(Process):
-
-    # Make 'handler' decorator
-    cls_handlers = []
-    def handler(handlers):
-        def bake_in(operation=""):
-            def decorator(func):
-                handlers.append((operation, func))
-                return func
-            return decorator
-        return bake_in
-    handler_for = handler(cls_handlers)
-
 
     def __init__(self, name):
         super().__init__()
@@ -210,14 +208,14 @@ class Actor(Process):
         self.__handlers = {}
         self.__ports = {}
 
-        # Add decorated handlers
-        for operation, handler in self.cls_handlers:
-            self.add_handler(operation, handler.__get__(self, type(self)))
-
     def add_handler(self, operation, handler):
         if operation in self.__handlers:
             raise ValueError("Handler for '{}' already exists!".format(operation))
         self.__handlers[operation] = handler
+
+    def add_handlers(self, handlers):
+        for operation, handler in handlers:
+            self.add_handler(operation, handler.__get__(self, type(self)))
 
     def add_port(self, port_name, port):
         self.__ports[port_name] = port
@@ -295,10 +293,14 @@ class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
+    __hs = []
+    handler_for = handler_deco(__hs)
+
     def __init__(self, name):
         super().__init__(name)
-        self.supervisor = None
+        self.add_handlers(self.__hs)
 
+        self.supervisor = None
         self.error_out = self.make_port("_error")
 
     def set_supervisor(self, supervisor):
@@ -307,11 +309,11 @@ class MonitoredMixin(Actor):
     def is_supervised(self):
         return self.supervisor is not None
 
-    @Actor.handler_for("_ping")
+    @handler_for("_ping")
     def __on_ping(self, msg):
         pass
 
-    @Actor.handler_for("_stop")
+    @handler_for("_stop")
     def __on_stop(self, msg):
         self.stop()
 
@@ -353,6 +355,13 @@ class DelayableMixin(Actor):
 
 class TimerMixin(Actor):
 
+    __hs = []
+    handler_for = handler_deco(__hs)
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.add_handlers(self.__hs)
+
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
             raise TypeError("Loop for TimerMixin must be TimedLoop instance!")
@@ -361,7 +370,7 @@ class TimerMixin(Actor):
     def add_timeout(self, callback, after, message=None):
         self._add_callback("_timeout", callback, message, when=after)
 
-    @Actor.handler_for("_after")
+    @handler_for("_after")
     def __after(self, msg):
         sender, operation, after = msg
         self.add_timeout(self.__delayed_send, after, message=(sender, operation))
@@ -474,8 +483,12 @@ class MeasuredMixin(InterceptedMixin, Actor):
 
 class SupervisorMixin(DelayableMixin, Actor):
 
+    __hs = []
+    handler_for = handler_deco(__hs)
+
     def __init__(self, name, children=[], probe_period=30, timeout_period=10):
         super().__init__(name)
+        self.add_handlers(self.__hs)
         self.__supervised_actors = set()
 
         self.__ping_q = set()
@@ -498,6 +511,7 @@ class SupervisorMixin(DelayableMixin, Actor):
         for actor in children:
             self.supervise(actor)
 
+        self.add_handler("_error", self.error_received)
         self.delay("_probe", self.__probe_period)
 
     def supervise(self, actor):
@@ -516,9 +530,8 @@ class SupervisorMixin(DelayableMixin, Actor):
         for actor in self.get_supervised():
             actor.send(operation, msg)
 
-    @Actor.handler_for("_error")
     def error_received(self, error_context):
-        actor, error = error_context.actor, error_context.err
+        actor, error = error_context.actor, error_context.get_exception()
         raise error
 
     def all_stopped(self, msg):
@@ -539,14 +552,14 @@ class SupervisorMixin(DelayableMixin, Actor):
                 self.__stop_q.add(actor)
                 actor.send("_stop", None, respond=(self, "_stop_received"))
 
-    @Actor.handler_for("_stop_received")
+    @handler_for("_stop_received")
     def _stop_received(self, actor):
         if actor in self.__stop_q:
             self.__stop_q.remove(actor)
             if len(self.__stop_q) == 0:
                 self.all_stopped(None)
 
-    @Actor.handler_for("_stop_check_failures")
+    @handler_for("_stop_check_failures")
     def stop_check_failures(self, _):
         if len(self.__stop_q) > 0:
             self.__stop_q = set()
@@ -555,7 +568,7 @@ class SupervisorMixin(DelayableMixin, Actor):
                                                                self.__failure_timeout_period))
         self.all_stopped(None)
 
-    @Actor.handler_for("_probe")
+    @handler_for("_probe")
     def _probe(self, _):
         if not self.stop_sent:
             self.__ping_q = set()
@@ -566,12 +579,12 @@ class SupervisorMixin(DelayableMixin, Actor):
 
             self.delay("_probe", self.__probe_period)
 
-    @Actor.handler_for("_pong")
+    @handler_for("_pong")
     def _pong(self, actor):
         if actor in self.__ping_q:
             self.__ping_q.remove(actor)
 
-    @Actor.handler_for("_ping_check_failures")
+    @handler_for("_ping_check_failures")
     def ping_check_failures(self, _):
         for actor in self.__ping_q:
             self.__ping_q.remove(actor)
