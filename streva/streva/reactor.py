@@ -12,9 +12,6 @@ import threading
 import time
 
 
-URGENT = -1
-NORMAL = 0
-
 
 class Done(Exception):
     """ Done is an exception signaled when a loop finishes
@@ -79,101 +76,84 @@ class UrgentQueue(queue.Queue):
             self.queue.append(x)
 
 
-class Observable:
+class Reactor:
+
+    NOW = 0.0
 
     def __init__(self):
-        self._observers = {}
-
-    def notify(self, event_name):
-        if event_name in self._observers:
-            for handler in self._observers[event_name]:
-                handler()
-
-    def add_observer(self, event_name, handler):
-        if event_name not in self._observers:
-            self._observers[event_name] = []
-        self._observers[event_name].append(handler)
-
-    def del_observer(self, event_name, handler):
-        if event_name in self._observers:
-            without_observer = []
-            for h in self._observers[event_name]:
-                if h != handler:
-                    without_observer.append(h)
-            self._observers[event_name] = without_observer
-
-
-class Loop(Observable):
-
-    def __init__(self):
-        super().__init__()
-
-        # Synchronization queue to emperor thread
-        self.done_queue = None
-
-        # Scheduling
-        self._queue = UrgentQueue()
-
-        # Running
-        self._thread = None
-        self._should_run = True
-
-    def synchronize(self, done):
-        self.done_queue = done
+        self._queue = queue.Queue()
+        self.__thread = None
 
     def start(self):
-        self._thread = threading.Thread(target=self._run)
-        self._thread.start()
+        self._react()
 
-    def stop(self):
-        self._should_run = False
+    def spawn(self, wait):
+        self.__thread = threading.Thread(target=self._synchronized)
+        self.__thread.start()
 
-        # Flush the queue with empty message if it was waiting for a timeout
-        self.schedule(lambda: None, schedule=NORMAL)
+    def _synchronized(self, wait):
+        result = None
 
-    def schedule(self, function, schedule):
-        event = Event(function)
-        self._queue.enqueue(event, urgent=(schedule == URGENT))
-
-    def _run(self):
-        if self.done_queue:
-            try:
-                self._loop()
-            except Exception as err:
-                self.done_queue.put((self, err))
-            else:
-                self.done_queue.put((self, Done()))
+        try:
+            self._react()
+        except Exception as err:
+            result = err
         else:
-            self._loop()
+            result = Done
 
-    def _loop(self):
-        while self._should_run:
-            self._iteration()
+        wait.put(result)
 
-    def _iteration(self):
-        event = self._queue.dequeue(block=True)
+    def receive(self, function, when):
+        event = Event(function)
+        self._queue.put(event)
+
+    def _react(self):
+        event = self._queue.get()
         event.function()
 
 
+class LoopReactor(Reactor):
 
-class TimedLoop(Loop):
+    def __init__(self):
+        super().__init__()
+        self.__running = False
+
+    def stop(self):
+        self.__running = False
+
+    def _react(self):
+        while self.__running:
+            self._iteration()
+
+    def _iteration(self):
+        event = self._queue.get()
+        event.function()
+
+
+class TimedReactor(LoopReactor):
 
     def __init__(self):
         super().__init__()
 
         # To avoid busy waiting, wait this number of seconds if there is no
-        # task or timeout to process in an iteration.
+        # event to process in an iteration.
         self._WAIT_ON_EMPTY = .5
-        self._timeouts = []
+        self._delayed = []
 
-    def schedule(self, function, schedule):
-        if schedule > 0:
-            event = DelayedEvent(function, schedule)
-            heapq.heappush(self._timeouts, event)
-        elif schedule <= 0:
-            super().schedule(function, schedule)
+    def stop(self):
+        super().stop()
+
+        # Flush the queue with empty event
+        self.receive(lambda: None, Reactor.NOW)
+
+    def receive(self, function, when):
+        if when > 0:
+            event = DelayedEvent(function, receive)
+            heapq.heappush(self._delayed, event)
+        elif when == 0:
+            super().receive(function, Reactor.NOW)
         else:
-            raise ValueError("'schedule' must be a number!")
+            raise ValueError("'when' must be a non-negative number!")
 
     def _iteration(self):
         now = time.time()
@@ -182,23 +162,22 @@ class TimedLoop(Loop):
         # Find timeout - time to nearest scheduled timeout or default
         # to WAIT_ON_EMPTY queue period
         if self._timeouts:
-            timeout = max(0, self._timeouts[0].deadline - now)
+            timeout = max(0, self._delayed[0].deadline - now)
 
         try:
             event = self._queue.dequeue(timeout=timeout)
         except queue.Empty:
-            # Timeout obtained means that a timeout event came before
+            # Timeout obtained means that a delayed event came before
             # an event from the queue
             pass
         else:
             event.function()
 
-        # Timeouts are processed after normal events, so that urgent
+        # Delayed events are processed after normal events, so that urgent
         # messages are processed first
-        while self._timeouts and self._timeouts[0].deadline <= now:
-            timeout = heapq.heappop(self._timeouts)
-            timeout.function()
-
+        while self._timeouts and self._delayed[0].deadline <= now:
+            delayed = heapq.heappop(self._delayed)
+            delayed.function()
 
 
 class Emperor:

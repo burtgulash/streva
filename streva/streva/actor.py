@@ -70,29 +70,29 @@ class Cancellable:
 class Process:
 
     def __init__(self):
-        self.__loop = None
+        self.__reactor = None
         self.__queued = []
         self.__planned = set()
         self.__stopped = False
 
-    def get_loop(self):
-        return self.__loop
+    def get_reactor(self):
+        return self.__reactor
 
-    def set_loop(self, loop):
-        self.__loop = loop
+    def set_reactor(self, reactor):
+        self.__reactor = reactor
 
-    def __queue_function(self, function, schedule):
-        self.__queued.append((function, schedule))
-        if self.__loop:
-            self.__schedule_all()
+    def __queue_function(self, function, when):
+        self.__queued.append((function, when))
+        if self.__reactor:
+            self.__react_all()
 
-    def __schedule_all(self):
-        if not self.__loop:
+    def __react_all(self):
+        if not self.__reactor:
             raise ValueError("Loop must be set before starting the process.!")
 
-        for function, schedule in self.__queued:
+        for function, when in self.__queued:
             self.__planned.add(function)
-            self.__loop.schedule(function, schedule)
+            self.__reactor.schedule(function, when)
         self.__queued = []
 
     def init(self):
@@ -118,7 +118,7 @@ class Process:
     def start(self):
         self._init()
         self.init()
-        self.__schedule_all()
+        self.__react_all()
 
     def stop(self):
         self.flush()
@@ -311,10 +311,10 @@ class TimerMixin(Actor):
         super().__init__(name)
         self.add_handler("_after", self.__after)
 
-    def set_loop(self, loop):
-        if not isinstance(loop, TimedLoop):
+    def set_reactor(self, reactor):
+        if not isinstance(reactor, TimedReactor):
             raise TypeError("Loop for TimerMixin must be TimedLoop instance!")
-        super().set_loop(loop)
+        super().set_reactor(reactor)
 
     def add_timeout(self, callback, after, message=None):
         self._add_callback("_timeout", callback, message, schedule=after)
