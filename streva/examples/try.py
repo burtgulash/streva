@@ -86,11 +86,12 @@ def register_stop_signal(supervisor, emperor):
 
 
 if __name__ == "__main__":
+    # Configure logging
+    logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
+
+
     loop = LoopReactor()
     timer_loop = TimedReactor()
-
-    emp = Emperor(children=[loop, timer_loop])
-    emp.start()
 
 
     # Define actors
@@ -103,13 +104,12 @@ if __name__ == "__main__":
     producer.connect_timer(supervisor)
     supervisor.connect_timer(supervisor)
 
+
+    emp = Emperor(children=[loop, timer_loop])
     # Register keyinterrupt signals to be effective
     register_stop_signal(supervisor, emp)
 
-    # Configure logging
-    logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
-
-
+    emp.start()
 
     consumer.set_reactor(loop)
     producer.set_reactor(loop)

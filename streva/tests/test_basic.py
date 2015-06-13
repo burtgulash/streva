@@ -2,7 +2,7 @@ import queue
 
 import streva.reactor
 from streva.actor import DelayableMixin, TimerMixin, MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
-from streva.reactor import Loop, TimedLoop, Emperor
+from streva.reactor import LoopReactor, TimedReactor, Emperor
 
 
 MARGINAL_DELAY = .000001
@@ -14,18 +14,16 @@ class StopProduction(Exception):
 
 class Producer(MonitoredMixin, DelayableMixin, Actor):
 
-    def __init__(self, name):
+    def __init__(self, name, to):
         super().__init__(name)
         self.add_handler("produce", self.produce)
-        self.out = self.make_port("out")
+        self.to = to
         self.count = 1
-
-    def init(self):
         self.delay("produce", MARGINAL_DELAY)
 
     def produce(self, msg):
         self.delay("produce", MARGINAL_DELAY)
-        self.out.send(self.count)
+        self.to.send("receive", self.count)
         self.count += 1
 
 
@@ -33,7 +31,7 @@ class Consumer(MonitoredMixin, Actor):
 
     def __init__(self, name):
         super().__init__(name)
-        self.add_handler("in", self.on_receive)
+        self.add_handler("receive", self.on_receive)
 
     def on_receive(self, msg):
         if msg > 100:
@@ -42,8 +40,8 @@ class Consumer(MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
-    def __init__(self, name, emperor):
-        super().__init__(name, timeout_period=.1, probe_period=.5)
+    def __init__(self, name, emperor, children=[]):
+        super().__init__(name, children=children, timeout_period=.1, probe_period=.5)
         self.stopped = False
         self.emperor = emperor
 
@@ -60,38 +58,28 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
 
 def test_count_to_100():
-    loop = Loop()
-    timer_loop = TimedLoop()
+    loop = LoopReactor()
+    timer_loop = TimedReactor()
 
     emp = Emperor()
-    emp.add_loop(loop)
-    emp.add_loop(timer_loop)
 
     # Define actors
-    producer = Producer("producer")
     consumer = Consumer("consumer")
-    supervisor = Supervisor("supervisor", emp)
-
-
-    # Set up message routing
-    producer.connect("out", consumer, "in")
-
-    supervisor.supervise(producer)
-    supervisor.supervise(consumer)
+    producer = Producer("producer", to=consumer)
+    supervisor = Supervisor("supervisor", emp, children=[producer, consumer])
 
     producer.connect_timer(supervisor)
     supervisor.connect_timer(supervisor)
 
     # Register processes within reactors
-    producer.set_loop(loop)
-    consumer.set_loop(loop)
-    supervisor.set_loop(timer_loop)
+    producer.set_reactor(loop)
+    consumer.set_reactor(loop)
+    supervisor.set_reactor(timer_loop)
 
-    # Start all
-    producer.start()
-    consumer.start()
     supervisor.start()
 
+    emp.add_reactor(loop)
+    emp.add_reactor(timer_loop)
 
     emp.start()
     emp.join()
