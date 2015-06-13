@@ -104,7 +104,8 @@ class Process(Enablable):
         super().__init__()
         self.__reactor = None
         self.__planned = set()
-        self.__stopped = True
+        # Deliberately start the Process as 'not __stopped'
+        self.__stopped = False
 
     def get_reactor(self):
         return self.__reactor
