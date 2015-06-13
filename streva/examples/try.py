@@ -77,6 +77,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
 
 
+# Register keyinterrupt signals to be effective
 def register_stop_signal(supervisor, emperor):
     def signal_stop_handler(sig, frame):
         supervisor.send("finish", emperor)
@@ -89,11 +90,6 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
-
-    loop = LoopReactor()
-    timer_loop = TimedReactor()
-
-
     # Define actors
     consumer = Consumer("consumer")
     producer = Producer("producer")
@@ -103,19 +99,14 @@ if __name__ == "__main__":
 
     producer.connect_timer(supervisor)
     supervisor.connect_timer(supervisor)
-
-
-    emp = Emperor(children=[loop, timer_loop])
-    # Register keyinterrupt signals to be effective
-    register_stop_signal(supervisor, emp)
-
-    emp.start()
-
-    consumer.set_reactor(loop)
-    producer.set_reactor(loop)
-    supervisor.set_reactor(timer_loop)
-
     supervisor.start()
 
+    # Define reactors
+    loop = LoopReactor(actors=[consumer, producer])
+    timer_loop = TimedReactor(actors=[supervisor])
+
+    emp = Emperor(children=[loop, timer_loop])
+    register_stop_signal(supervisor, emp)
+    emp.start()
     emp.join()
 

@@ -113,6 +113,10 @@ class Process(Enablable):
         self.__reactor = reactor
         self.activate()
 
+    def unset_reactor(self):
+        self.deactivate()
+        self.__reactor = None
+
     def _process(self, message):
         if not self.__reactor:
             raise ValueError("Loop must be set before starting the process.!")
@@ -131,16 +135,14 @@ class Process(Enablable):
 
     def stop(self):
         self.call(self._stop)
-        self._stopped = True
 
     def start(self):
         self.__stopped = False
-        self.activate()
 
     def _stop(self):
-        self.deactivate()
         self.flush()
         self.terminate()
+        self.__stopped = True
 
     def call(self, function, *args, when=Reactor.NOW, **kwds):
         @wraps(function)
