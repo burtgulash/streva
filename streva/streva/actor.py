@@ -87,6 +87,9 @@ class Process:
             self.__schedule_all()
 
     def __schedule_all(self):
+        if not self.__loop:
+            raise ValueError("Loop must be set before starting the process.!")
+
         for function, schedule in self.__queued:
             self.__planned.add(function)
             self.__loop.schedule(function, schedule)
@@ -296,7 +299,6 @@ class DelayableMixin(Actor):
         self.__after_out = self.make_port("_after")
 
     def connect_timer(self, timer_actor):
-        print("CONNECTING", self, timer_actor)
         self.connect("_after", timer_actor, "_after")
 
     def delay(self, operation, after):

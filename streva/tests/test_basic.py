@@ -14,8 +14,8 @@ class StopProduction(Exception):
 
 class Producer(MonitoredMixin, DelayableMixin, Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.add_handler("produce", self.produce)
         self.out = self.make_port("out")
         self.count = 1
@@ -31,8 +31,8 @@ class Producer(MonitoredMixin, DelayableMixin, Actor):
 
 class Consumer(MonitoredMixin, Actor):
 
-    def __init__(self, loop, name):
-        super().__init__(loop, name)
+    def __init__(self, name):
+        super().__init__(name)
         self.add_handler("in", self.on_receive)
 
     def on_receive(self, msg):
@@ -42,8 +42,8 @@ class Consumer(MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
-    def __init__(self, loop, name, emperor):
-        super().__init__(loop, name, timeout_period=.1, probe_period=.5)
+    def __init__(self, name, emperor):
+        super().__init__(name, timeout_period=.1, probe_period=.5)
         self.stopped = False
         self.emperor = emperor
 
@@ -68,16 +68,29 @@ def test_count_to_100():
     emp.add_loop(timer_loop)
 
     # Define actors
-    producer = Producer(loop, "producer")
-    consumer = Consumer(loop, "consumer")
-    supervisor = Supervisor(timer_loop, "supervisor", emp)
+    producer = Producer("producer")
+    consumer = Consumer("consumer")
+    supervisor = Supervisor("supervisor", emp)
 
+
+    # Set up message routing
     producer.connect("out", consumer, "in")
+
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
     producer.connect_timer(supervisor)
     supervisor.connect_timer(supervisor)
+
+    # Register processes within reactors
+    producer.set_loop(loop)
+    consumer.set_loop(loop)
+    supervisor.set_loop(timer_loop)
+
+    # Start all
+    producer.start()
+    consumer.start()
+    supervisor.start()
 
 
     emp.start()
