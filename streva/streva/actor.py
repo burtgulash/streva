@@ -177,11 +177,11 @@ class Actor(Process):
         self._add_callback(operation, f, message, schedule=schedule)
 
 
-class HookedMixin(Actor):
+class InterceptedMixin(Actor):
 
     def __init__(self, loop, name):
         super().__init__(loop, name)
-        self._h_lock = threading.Lock()
+        self.__intercept_lock = threading.Lock()
 
     class Id:
         pass
@@ -201,16 +201,16 @@ class HookedMixin(Actor):
         # Because _add_callback is the only function, which is called from
         # another thread and method self.before_schedule can modify this
         # actor's state, we need to put it into critical section
-        with self._h_lock:
+        with self.__intercept_lock:
             self.before_schedule(execution_id, operation, function, message)
 
         @wraps(function)
-        def hooked_function(message):
+        def intercepted_function(message):
             self.before_execute(execution_id, operation, function, message)
             function(message)
             self.after_execute(execution_id, operation, function, message)
 
-        super()._add_callback(operation, hooked_function, message, schedule=schedule)
+        super()._add_callback(operation, intercepted_function, message, schedule=schedule)
 
 
 class MonitoredMixin(Actor):
@@ -221,8 +221,8 @@ class MonitoredMixin(Actor):
         super().__init__(loop, name)
         self.supervisor = None
 
-        self.add_handler("_ping", self._on_ping)
-        self.add_handler("_stop", self._on_stop)
+        self.add_handler("_ping", self.__on_ping)
+        self.add_handler("_stop", self.__on_stop)
         self.error_out = self.make_port("_error")
 
     def set_supervisor(self, supervisor):
@@ -231,10 +231,10 @@ class MonitoredMixin(Actor):
     def is_supervised(self):
         return self.supervisor is not None
 
-    def _on_ping(self, msg):
+    def __on_ping(self, msg):
         pass
 
-    def _on_stop(self, msg):
+    def __on_stop(self, msg):
         self.send_stop()
 
     def on_error(self, err):
@@ -334,7 +334,7 @@ class Stats:
             a.add(b.value)
 
 
-class MeasuredMixin(HookedMixin, Actor):
+class MeasuredMixin(InterceptedMixin, Actor):
 
     class Execution:
 
@@ -346,29 +346,29 @@ class MeasuredMixin(HookedMixin, Actor):
         super().__init__(loop, name)
 
         self.last_updated = time.time()
-        self._stats = {}
-        self._hooked_events = {}
+        self.__stats = {}
+        self.__intercepted_events = {}
 
     def before_schedule(self, execution_id, operation, function, message):
-        if operation not in self._stats:
-            self._stats[operation] = Stats(operation)
+        if operation not in self.__stats:
+            self.__stats[operation] = Stats(operation)
 
         execution = self.Execution()
         execution.planned_at = time.time()
 
-        self._hooked_events[execution_id] = execution
+        self.__intercepted_events[execution_id] = execution
 
     def before_execute(self, execution_id, operation, function, message):
-        self._hooked_events[execution_id].started_at = time.time()
+        self.__intercepted_events[execution_id].started_at = time.time()
 
     def after_execute(self, execution_id, operation, function, message):
-        assert operation in self._stats
-        assert execution_id in self._hooked_events
+        assert operation in self.__stats
+        assert execution_id in self.__intercepted_events
 
         now = time.time()
 
-        stats = self._stats[operation]
-        execution = self._hooked_events[execution_id]
+        stats = self.__stats[operation]
+        execution = self.__intercepted_events[execution_id]
 
         stats.runs += 1
         stats.processing_time.add(now - execution.started_at)
@@ -378,7 +378,7 @@ class MeasuredMixin(HookedMixin, Actor):
         self.last_updated = now
 
     def get_stats(self):
-        return [s for s in sorted(self._stats.values(), key=lambda x: x.runs)]
+        return [s for s in sorted(self.__stats.values(), key=lambda x: x.runs)]
 
     def get_total_stats(self):
         total = Stats("Total")
@@ -397,22 +397,22 @@ class MeasuredMixin(HookedMixin, Actor):
 class SupervisorMixin(DelayableMixin, Actor):
 
     def __init__(self, loop, name, probe_period=30, timeout_period=10):
-        self._supervised_actors = set()
+        self.__supervised_actors = set()
 
-        self._ping_q = set()
-        self._stop_q = set()
+        self.__ping_q = set()
+        self.__stop_q = set()
 
         # Probe all supervised actors regularly with this time period in
         # seconds
-        self._probe_period = probe_period
+        self.__probe_period = probe_period
 
         # Echo timeouts after this many seconds. Ie. this means the time period
         # after which a supervised actor should be recognized as dead
-        self._failure_timeout_period = timeout_period
+        self.__failure_timeout_period = timeout_period
 
         # Make sure that all actors are evaluated of one round of probing
         # before next round of probing
-        if not self._failure_timeout_period * 2 < self._probe_period:
+        if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
         self.stop_sent = False
@@ -435,12 +435,12 @@ class SupervisorMixin(DelayableMixin, Actor):
             raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
                     format(actor.name))
 
-        self._supervised_actors.add(actor)
+        self.__supervised_actors.add(actor)
         actor.set_supervisor(self)
         actor.connect("_error", self, "_error")
 
     def get_supervised(self):
-        return list(self._supervised_actors)
+        return list(self.__supervised_actors)
 
     def broadcast(self, operation, msg):
         for actor in self.get_supervised():
@@ -458,46 +458,46 @@ class SupervisorMixin(DelayableMixin, Actor):
         if not self.stop_sent:
             self.stop_sent = True
 
-            self.delay("_stop_check_failures", self._failure_timeout_period)
+            self.delay("_stop_check_failures", self.__failure_timeout_period)
             for actor in self.get_supervised():
-                self._stop_q.add(actor)
+                self.__stop_q.add(actor)
                 actor.send("_stop", None, respond=(self, "_stop_received"), urgent=True)
 
     def _stop_received(self, actor):
-        if actor in self._stop_q:
-            self._stop_q.remove(actor)
-            if len(self._stop_q) == 0:
+        if actor in self.__stop_q:
+            self.__stop_q.remove(actor)
+            if len(self.__stop_q) == 0:
                 self.all_stopped(None)
 
     def stop_check_failures(self, _):
-        if len(self._stop_q) > 0:
-            self._stop_q = set()
+        if len(self.__stop_q) > 0:
+            self.__stop_q = set()
             logging.warning("""Killing everything ungracefully!
-{} actors haven't responded to stop request in {} s.""".format(len(self._stop_q),
-                                                               self._failure_timeout_period))
+{} actors haven't responded to stop request in {} s.""".format(len(self.__stop_q),
+                                                               self.__failure_timeout_period))
         self.all_stopped(None)
 
     # Supervisor ping process
     def init_probe_cycle(self):
-        self.delay("_probe", self._probe_period)
+        self.delay("_probe", self.__probe_period)
 
-    def _probe(self, msg):
+    def _probe(self, _):
         if not self.stop_sent:
-            self._ping_q = set()
+            self.__ping_q = set()
 
             for actor in self.get_supervised():
-                self._ping_q.add(actor)
+                self.__ping_q.add(actor)
                 actor.send("_ping", None, respond=(self, "_pong"), urgent=True)
 
-            self.delay("_probe", self._probe_period)
+            self.delay("_probe", self.__probe_period)
 
     def _pong(self, actor):
-        if actor in self._ping_q:
-            self._ping_q.remove(actor)
+        if actor in self.__ping_q:
+            self.__ping_q.remove(actor)
 
     def ping_check_failures(self, _):
-        for actor in self._ping_q:
-            self._ping_q.remove(actor)
+        for actor in self.__ping_q:
+            self.__ping_q.remove(actor)
             logging.error("Actor '{}' hasn't responded in {} seconds!".format(actor.name,
-                                                                    self._failure_timeout_period))
+                                                                    self.__failure_timeout_period))
 
