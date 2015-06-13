@@ -81,7 +81,7 @@ class Reactor:
     NOW = 0.0
 
     def __init__(self):
-        self._queue = queue.Queue()
+        self._queue = UrgentQueue()
         self.__thread = None
 
     def start(self):
@@ -102,23 +102,24 @@ class Reactor:
         result = None
 
         try:
-            self._react()
+            self.start()
         except Exception as err:
             result = err
         else:
             result = Done
 
-        wait.put(result)
+        wait.put((self, result))
 
     def receive(self, function, when):
         event = Event(function)
-        self._queue.put(event)
+        self._schedule(event)
+
+    def _schedule(self, event, skip=False):
+        self._queue.enqueue(event, urgent=skip)
 
     def _react(self):
-        print("REACTO")
-        event = self._queue.get()
+        event = self._queue.dequeue()
         event.function()
-        print("REACTO2")
 
 
 class LoopReactor(Reactor):
@@ -130,7 +131,11 @@ class LoopReactor(Reactor):
     def stop(self):
         self.__running = False
 
+        # Flush the queue with empty event
+        self.receive(lambda: None, Reactor.NOW)
+
     def _react(self):
+        self.__running = True
         while self.__running:
             self._iteration()
 
@@ -149,18 +154,12 @@ class TimedReactor(LoopReactor):
         self._WAIT_ON_EMPTY = .5
         self._delayed = []
 
-    def stop(self):
-        super().stop()
-
-        # Flush the queue with empty event
-        self.receive(lambda: None, Reactor.NOW)
-
     def receive(self, function, when):
         if when > 0:
-            event = DelayedEvent(function, receive)
-            heapq.heappush(self._delayed, event)
+            event = DelayedEvent(function, when)
+            self._schedule(event, skip=True)
         elif when == 0:
-            super().receive(function, Reactor.NOW)
+            super().receive(function, when)
         else:
             raise ValueError("'when' must be a non-negative number!")
 
@@ -170,7 +169,7 @@ class TimedReactor(LoopReactor):
         timeout = self._WAIT_ON_EMPTY
         # Find timeout - time to nearest scheduled timeout or default
         # to WAIT_ON_EMPTY queue period
-        if self._timeouts:
+        if self._delayed:
             timeout = max(0, self._delayed[0].deadline - now)
 
         try:
@@ -180,11 +179,14 @@ class TimedReactor(LoopReactor):
             # an event from the queue
             pass
         else:
-            event.function()
+            if isinstance(event, DelayedEvent):
+                heapq.heappush(self._delayed, event)
+            else:
+                event.function()
 
         # Delayed events are processed after normal events, so that urgent
         # messages are processed first
-        while self._timeouts and self._delayed[0].deadline <= now:
+        while self._delayed and self._delayed[0].deadline <= now:
             delayed = heapq.heappop(self._delayed)
             delayed.function()
 
@@ -207,13 +209,14 @@ class Emperor:
             reactor.stop()
 
     def join(self):
-        for reactor in self.__reactors:
+        for x in range(len(self.__reactors)):
             reactor, result = self.__synchro.get()
             try:
                 raise result
             except Done:
                 pass
             except:
-                # Explicitly re-raise
+                self.stop()
+                # Explicitly re-raise catched exception
                 raise
 

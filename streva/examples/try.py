@@ -45,7 +45,6 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
     def __init__(self, name, children=[]):
         super().__init__(name, children=children, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
-        self.end = self.make_port("end")
         self.stopped = False
 
     def error_received(self, error_context):
@@ -67,29 +66,21 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
         print("\n--------------------------------------------------")
         print(bottomline)
 
-    def finish(self):
+    def finish(self, emperor):
+        self.emperor = emperor
         if not self.stopped:
             self.stopped = True
             self.stop_children()
 
     def all_stopped(self, _):
         self.print_statistics()
-        self.end.send("the end")
+        self.emperor.stop()
 
 
-class End(Actor):
 
-    def __init__(self, name):
-        super().__init__(name)
-        self.add_handler("await", self.end)
-
-    def end(self, msg):
-        assert msg == "the end"
-
-
-def register_stop_signal(supervisor):
+def register_stop_signal(supervisor, emperor):
     def signal_stop_handler(sig, frame):
-        supervisor.send("finish", None)
+        supervisor.send("finish", emperor)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
@@ -98,39 +89,34 @@ def register_stop_signal(supervisor):
 if __name__ == "__main__":
     loop = LoopReactor()
     timer_loop = TimedReactor()
-    once = Reactor()
 
+    emp = Emperor(children=[loop, timer_loop])
+    emp.start()
 
 
     # Define actors
-    end = End("end")
     consumer = Consumer("consumer")
     producer = Producer("producer")
     supervisor = Supervisor("supervisor", children=[consumer, producer])
 
-    supervisor.connect("end", end, "await")
     producer.connect("out", consumer, "in")
 
     producer.connect_timer(supervisor)
     supervisor.connect_timer(supervisor)
 
     # Register keyinterrupt signals to be effective
-    register_stop_signal(supervisor)
+    register_stop_signal(supervisor, emp)
 
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
 
-    emp = Emperor(children=[loop, timer_loop])
-    emp.start()
 
     consumer.set_reactor(loop)
     producer.set_reactor(loop)
     supervisor.set_reactor(timer_loop)
-    end.set_reactor(once)
 
     supervisor.start()
 
-    once.start()
     emp.join()
 

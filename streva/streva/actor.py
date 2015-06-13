@@ -73,7 +73,7 @@ class Process:
         self.__reactor = None
         self.__queued = []
         self.__planned = set()
-        self.__stopped = False
+        self.__active = False
 
     def get_reactor(self):
         return self.__reactor
@@ -116,18 +116,19 @@ class Process:
         self.call(self._stop)
 
     def start(self):
+        self.__active = True
         self._init()
         self.init()
         self.__react_all()
 
     def _stop(self):
+        self.__active = False
         self.flush()
-        self.__stopped = True
         self._terminate()
         self.terminate()
 
     def call(self, function, *args, when=Reactor.NOW, **kwds):
-        if self.__stopped:
+        if not self.__active:
             return
 
         @wraps(function)
