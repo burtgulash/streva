@@ -18,8 +18,8 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
     def __init__(self, name):
         super().__init__(name)
         self.out = self.make_port("out")
-
         self.count = 1
+
         self.delay("produce", .00001)
 
     @Actor.handler_for("produce")
@@ -69,7 +69,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
             self.stop_children()
 
     def terminate(self):
-        # self.print_statistics() # TODO
+        self.print_statistics()
         self.emperor.stop()
 
 
