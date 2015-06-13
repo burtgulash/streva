@@ -42,11 +42,10 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
 
 class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
-    def __init__(self, name, emperor):
+    def __init__(self, name):
         super().__init__(name, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
         self.stopped = False
-        self.emperor = emperor
 
     def error_received(self, error_context):
         error = error_context.error
@@ -67,7 +66,8 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
         print("\n--------------------------------------------------")
         print(bottomline)
 
-    def finish(self, _):
+    def finish(self, emperor):
+        self.emperor = emperor
         if not self.stopped:
             self.stopped = True
             self.stop_children()
@@ -78,9 +78,9 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
         self.print_statistics()
 
 
-def register_stop_signal(supervisor):
+def register_stop_signal(supervisor, emperor):
     def signal_stop_handler(sig, frame):
-        supervisor.send("finish", None, urgent=True)
+        supervisor.send("finish", emperor)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     producer = Producer("producer")
     producer.connect("out", consumer, "in")
 
-    supervisor = Supervisor("supervisor", emp)
+    supervisor = Supervisor("supervisor")
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     supervisor.connect_timer(supervisor)
 
     # Register keyinterrupt signals to be effective
-    register_stop_signal(supervisor)
+    register_stop_signal(supervisor, emp)
 
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
