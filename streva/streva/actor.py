@@ -67,70 +67,82 @@ class Cancellable:
         return self.cancelled
 
 
-class Process:
+class Enablable:
 
     def __init__(self):
-        self.__reactor = None
-        self.__queued = []
-        self.__planned = set()
         self.__active = False
+        self.__waiting = []
+
+    def __process_waiting(self):
+        for message in self.__waiting:
+            self._process(message)
+        self.__waiting = []
+
+    def _process(self, message):
+        pass
+
+    def _enqueue(self, message):
+        self.__waiting.append(message)
+
+    def active(self):
+        return self.__active
+
+    def activate(self):
+        self.__active = True
+        self.__process_waiting()
+
+    def flush(self):
+        self.__waiting = []
+
+    def deactivate(self):
+        self.__active = False
+
+
+class Process(Enablable):
+
+    def __init__(self):
+        super().__init__()
+        self.__reactor = None
+        self.__planned = set()
+        self.__stopped = True
 
     def get_reactor(self):
         return self.__reactor
 
     def set_reactor(self, reactor):
         self.__reactor = reactor
+        self.activate()
 
-    def __queue_function(self, function, when):
-        self.__queued.append((function, when))
-        if self.__reactor:
-            self.__react_all()
-
-    def __react_all(self):
+    def _process(self, message):
         if not self.__reactor:
             raise ValueError("Loop must be set before starting the process.!")
 
-        for function, when in self.__queued:
-            self.__planned.add(function)
-            self.__reactor.receive(function, when)
-        self.__queued = []
-
-    def init(self):
-        pass
-
-    def _init(self):
-        pass
+        function, when = message
+        self.__planned.add(function)
+        self.__reactor.receive(function, when)
 
     def terminate(self):
         pass
 
-    def _terminate(self):
-        pass
-
     def flush(self):
-        self.__queued = []
+        super().flush()
         for f in self.__planned:
             f.cancel()
 
     def stop(self):
         self.call(self._stop)
+        self._stopped = True
 
     def start(self):
-        self.__active = True
-        self._init()
-        self.init()
-        self.__react_all()
+        self.__stopped = False
+        self.activate()
 
     def _stop(self):
-        self.__active = False
+        self.deactivate()
         self.flush()
-        self._terminate()
         self.terminate()
 
     def call(self, function, *args, when=Reactor.NOW, **kwds):
-        if not self.__active:
-            return
-
         @wraps(function)
         def baked():
             function(*args, **kwds)
@@ -141,10 +153,14 @@ class Process:
             self.__planned.remove(func)
         func.add_cleanup_f(cleanup)
 
-        self.__queue_function(func, when)
+        if not self.__stopped:
+            if self.active():
+                self._process((func, when))
+            else:
+                self._enqueue((func, when))
 
 
-class Port:
+class Port(Enablable):
     """ Port is a named set of actors to all of which an outbound message will
     be sent through this port.
 
@@ -152,18 +168,22 @@ class Port:
     """
 
     def __init__(self, name):
+        super().__init__()
         self.name = name
         self.__targets = []
 
     def add_target(self, actor, operation):
         self.__targets.append((actor, operation))
 
-    def send(self, message):
-        if not self.__targets:
-            raise Exception("Empty targets of port {}!".format(self.name))
-
+    def _process(self, message):
         for target_actor, operation in self.__targets:
             target_actor.send(operation, message)
+
+    def send(self, message):
+        if self.active():
+            self._process(message)
+        else:
+            self._enqueue(message)
 
 
 class Actor(Process):
@@ -185,6 +205,11 @@ class Actor(Process):
         port = Port(port_name)
         self.add_port(port_name, port)
         return port
+
+    def start(self):
+        for port in self.__ports.values():
+            port.activate()
+        super().start()
 
     def connect(self, port_name, to_actor, to_operation):
         port = self.__ports[port_name]
@@ -464,8 +489,6 @@ class SupervisorMixin(DelayableMixin, Actor):
         for actor in children:
             self.supervise(actor)
 
-    
-    def _init(self):
         self.delay("_probe", self.__probe_period)
 
     def supervise(self, actor):

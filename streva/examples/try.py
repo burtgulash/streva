@@ -19,9 +19,8 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
         super().__init__(name)
         self.out = self.add_handler("produce", self.produce)
         self.out = self.make_port("out")
-        self.count = 1
 
-    def init(self):
+        self.count = 1
         self.delay("produce", .00001)
 
     def produce(self, msg):
