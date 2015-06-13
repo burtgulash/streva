@@ -5,28 +5,29 @@ import queue
 import signal
 import threading
 
-from streva.actor import MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
-from streva.reactor import TimedLoop, Emperor
+from streva.actor import DelayableMixin, TimerMixin, MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
+from streva.reactor import Loop, TimedLoop, Emperor
 
 
 class StopProduction(Exception):
     pass
 
 
-class Producer(MeasuredMixin, MonitoredMixin, Actor):
+class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
 
     def __init__(self, loop, name):
         super().__init__(loop, name)
+        self.out = self.add_handler("produce", self.produce)
         self.out = self.make_port("out")
         self.count = 1
 
     def init(self):
-        self.add_timeout(self.produce, .00001)
+        self.delay("produce", .00001)
 
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.add_timeout(self.produce, .01)
+        self.delay("produce", .01)
 
 
 class Consumer(MeasuredMixin, MonitoredMixin, Actor):
@@ -39,12 +40,13 @@ class Consumer(MeasuredMixin, MonitoredMixin, Actor):
         logging.info("Count is: {}".format(msg))
 
 
-class Supervisor(SupervisorMixin, Actor):
+class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
-    def __init__(self, loop, name):
+    def __init__(self, loop, name, emperor):
         super().__init__(loop, name, timeout_period=1.0, probe_period=4.0)
         self.add_handler("finish", self.finish)
         self.stopped = False
+        self.emperor = emperor
 
     def error_received(self, error_context):
         error = error_context.error
@@ -71,10 +73,8 @@ class Supervisor(SupervisorMixin, Actor):
             self.stop_children()
 
     def all_stopped(self, _):
+        self.emperor.stop()
         self.stop()
-        # End all action here
-        self.get_loop().stop()
-
         self.print_statistics()
 
 
@@ -87,25 +87,30 @@ def register_stop_signal(supervisor):
 
 
 if __name__ == "__main__":
-    loop = TimedLoop()
+    loop = Loop()
+    timer_loop = TimedLoop()
+
+    emp = Emperor()
+    emp.add_loop(loop)
+    emp.add_loop(timer_loop)
 
     # Define actors
     consumer = Consumer(loop, "consumer")
     producer = Producer(loop, "producer")
     producer.connect("out", consumer, "in")
 
-    supervisor = Supervisor(loop, "supervisor")
+    supervisor = Supervisor(timer_loop, "supervisor", emp)
     supervisor.supervise(producer)
     supervisor.supervise(consumer)
+
+    producer.connect_timer(supervisor)
+    supervisor.connect_timer(supervisor)
 
     # Register keyinterrupt signals to be effective
     register_stop_signal(supervisor)
 
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
-
-    emp = Emperor()
-    emp.add_loop(loop)
 
     emp.start()
     emp.join()

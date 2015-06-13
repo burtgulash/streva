@@ -12,6 +12,10 @@ import threading
 import time
 
 
+URGENT = -1
+NORMAL = 0
+
+
 class Done(Exception):
     """ Done is an exception signaled when a loop finishes
     successfully.
@@ -19,34 +23,36 @@ class Done(Exception):
     pass
 
 
-URGENT = -1
-NORMAL = 0
-
-
 class Event:
 
-    __slots__ = "function", "delayed", "deadline"
+    __slots__ = "function"
 
-    def __init__(self, function, delay=None):
+    def __init__(self, function):
         self.function = function
-        self.delayed = False
-        self.deadline = time.time()
-
-        if delay:
-            self.delayed = True
-            self.deadline += delay
 
     def __repr__(self):
         return "Event({})".format(self.function)
 
-    def is_delayed(self):
-        return self.delayed
+
+class DelayedEvent(Event):
+
+    __slots__ = "deadline", "delay"
+
+    def __init__(self, function, delay):
+        super().__init__(function)
+        self.deadline = time.time()
+        self.delay = delay or 0
+        if delay and delay >= 0:
+            self.deadline += delay
 
     def __lt__(self, other):
         return self.deadline < other.deadline
 
     def __le__(self, other):
         return self.deadline <= other.deadline
+
+    def __repr__(self):
+        return "DelayedEvent({}, after={})".format(self.function, self.delay)
 
 
 class UrgentQueue(queue.Queue):
@@ -123,19 +129,11 @@ class Loop(Observable):
         self._should_run = False
 
         # Flush the queue with empty message if it was waiting for a timeout
-        empty_event = Event(lambda: None)
-        self.schedule(empty_event, NORMAL)
+        self.schedule(lambda: None, schedule=NORMAL)
 
     def schedule(self, function, schedule):
         event = Event(function)
-        if schedule < 0:
-            self._queue.enqueue(event, urgent=True)
-        elif schedule == 0:
-            self._queue.enqueue(event)
-        elif schedule > 0:
-            raise ValueError("This loop can not schedule delayed events!")
-        else:
-            raise ValueError("Schedule must be a number!.")
+        self._queue.enqueue(event, urgent=(schedule == URGENT))
 
     def _run(self):
         if self.done_queue:
@@ -172,10 +170,12 @@ class TimedLoop(Loop):
 
     def schedule(self, function, schedule):
         if schedule > 0:
-            event = Event(function, delay=schedule)
+            event = DelayedEvent(function, schedule)
             heapq.heappush(self._timeouts, event)
-        else:
+        elif schedule <= 0:
             super().schedule(function, schedule)
+        else:
+            raise ValueError("'schedule' must be a number!")
 
     def _iteration(self):
         now = time.time()

@@ -4,7 +4,8 @@ import threading
 import time
 import traceback
 
-from streva.reactor import NORMAL, URGENT
+
+from streva.reactor import TimedLoop, URGENT, NORMAL
 
 
 class ErrorContext:
@@ -97,11 +98,11 @@ class Process:
         self.flush()
         self.__stopped = True
 
-    def call(self, function, *args, schedule=NORMAL, **kwargs):
+    def call(self, function, *args, schedule=NORMAL, **kwds):
         if not self.__stopped:
             @wraps(function)
             def baked():
-                function(*args, **kwargs)
+                function(*args, **kwds)
 
             func = Cancellable(baked)
 
@@ -125,6 +126,9 @@ class Port:
         self._targets = []
 
     def send(self, message):
+        if not self._targets:
+            raise Exception("Empty targets of port {}!".format(self.name))
+
         for target_actor, operation in self._targets:
             target_actor.send(operation, message)
 
@@ -155,9 +159,6 @@ class Actor(Process):
 
     def _add_callback(self, operation, function, message, schedule=NORMAL):
         self.call(function, message, schedule=schedule)
-
-    def add_timeout(self, function, delay, message=None):
-        self._add_callback("_timeout", function, message, schedule=delay)
 
     def send(self, operation, message, respond=None, urgent=False):
         handler = self.__handlers[operation]
@@ -256,7 +257,40 @@ class MonitoredMixin(Actor):
                 self.error_out.send(error_context)
                 self.on_error(error)
 
-        super()._add_callback(operation, try_function, message, schedule)
+        super()._add_callback(operation, try_function, message, schedule=schedule)
+
+
+class DelayableMixin(Actor):
+
+    def __init__(self, loop, name):
+        super().__init__(loop, name)
+        self.__after_out = self.make_port("_after")
+
+    def connect_timer(self, timer_actor):
+        self.connect("_after", timer_actor, "_after")
+
+    def delay(self, operation, after):
+        self.__after_out.send((self, operation, after))
+
+
+class TimerMixin(Actor):
+
+    def __init__(self, loop, name):
+        if not isinstance(loop, TimedLoop):
+            raise TypeError("Loop for TimerMixin must be TimedLoop instance!")
+        super().__init__(loop, name)
+        self.add_handler("_after", self.__after)
+
+    def add_timeout(self, callback, after, message=None):
+        self._add_callback("_timeout", callback, message, schedule=after)
+
+    def __after(self, msg):
+        sender, operation, after = msg
+        self.add_timeout(self.__delayed_send, after, message=(sender, operation))
+
+    def __delayed_send(self, msg):
+        sender, operation = msg
+        sender.send(operation, None)
 
 
 class Stats:
@@ -360,7 +394,7 @@ class MeasuredMixin(HookedMixin, Actor):
         print(self.get_total_stats())
 
 
-class SupervisorMixin(Actor):
+class SupervisorMixin(DelayableMixin, Actor):
 
     def __init__(self, loop, name, probe_period=30, timeout_period=10):
         self._supervised_actors = set()
@@ -392,6 +426,10 @@ class SupervisorMixin(Actor):
         self.add_handler("_stop_received", self._stop_received)
         self.add_handler("_pong", self._pong)
 
+        self.add_handler("_stop_check_failures", self.stop_check_failures)
+        self.add_handler("_ping_check_failures", self.ping_check_failures)
+        self.add_handler("_probe", self._probe)
+
     def supervise(self, actor):
         if not isinstance(actor, MonitoredMixin):
             raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
@@ -420,7 +458,7 @@ class SupervisorMixin(Actor):
         if not self.stop_sent:
             self.stop_sent = True
 
-            self.add_timeout(self.stop_check_failures, self._failure_timeout_period)
+            self.delay("_stop_check_failures", self._failure_timeout_period)
             for actor in self.get_supervised():
                 self._stop_q.add(actor)
                 actor.send("_stop", None, respond=(self, "_stop_received"), urgent=True)
@@ -439,20 +477,19 @@ class SupervisorMixin(Actor):
                                                                self._failure_timeout_period))
         self.all_stopped(None)
 
-
     # Supervisor ping process
     def init_probe_cycle(self):
-        def probe(_):
-            if not self.stop_sent:
-                self._ping_q = set()
+        self.delay("_probe", self._probe_period)
 
-                self.add_timeout(self.ping_check_failures, self._failure_timeout_period)
-                for actor in self.get_supervised():
-                    self._ping_q.add(actor)
-                    actor.send("_ping", None, respond=(self, "_pong"), urgent=True)
+    def _probe(self, msg):
+        if not self.stop_sent:
+            self._ping_q = set()
 
-                self.add_timeout(probe, self._probe_period)
-        self.add_timeout(probe, self._probe_period)
+            for actor in self.get_supervised():
+                self._ping_q.add(actor)
+                actor.send("_ping", None, respond=(self, "_pong"), urgent=True)
+
+            self.delay("_probe", self._probe_period)
 
     def _pong(self, actor):
         if actor in self._ping_q:
