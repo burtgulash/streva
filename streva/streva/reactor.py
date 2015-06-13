@@ -87,9 +87,16 @@ class Reactor:
     def start(self):
         self._react()
 
+    def stop(self):
+        # Can't stop this!
+        pass
+
     def spawn(self, wait):
-        self.__thread = threading.Thread(target=self._synchronized)
+        self.__thread = threading.Thread(target=self._synchronized, args=[wait])
         self.__thread.start()
+
+    def join(self):
+        self.__thread.join()
 
     def _synchronized(self, wait):
         result = None
@@ -108,8 +115,10 @@ class Reactor:
         self._queue.put(event)
 
     def _react(self):
+        print("REACTO")
         event = self._queue.get()
         event.function()
+        print("REACTO2")
 
 
 class LoopReactor(Reactor):
@@ -182,30 +191,29 @@ class TimedReactor(LoopReactor):
 
 class Emperor:
 
-    def __init__(self):
-        self.done_queue = queue.Queue()
-        self._loops = set()
+    def __init__(self, children=[]):
+        self.__synchro = queue.Queue()
+        self.__reactors = set(children)
 
-    def add_loop(self, loop):
-        self._loops.add(loop)
-        loop.synchronize(self.done_queue)
+    def add_reactor(self, reactor):
+        self.__reactors.add(reactor)
 
     def start(self):
-        for loop in self._loops:
-            loop.start()
+        for reactor in self.__reactors:
+            reactor.spawn(self.__synchro)
 
     def stop(self):
-        for loop in self._loops:
-            loop.stop()
+        for reactor in self.__reactors:
+            reactor.stop()
 
     def join(self):
-        for x in self._loops:
-            loop, sig = self.done_queue.get()
+        for reactor in self.__reactors:
+            reactor, result = self.__synchro.get()
             try:
-                raise sig
+                raise result
             except Done:
                 pass
             except:
-                # Explicitly raise
+                # Explicitly re-raise
                 raise
 

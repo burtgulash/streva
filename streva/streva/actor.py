@@ -5,7 +5,7 @@ import time
 import traceback
 
 
-from streva.reactor import TimedLoop, URGENT, NORMAL
+from streva.reactor import Reactor, TimedReactor
 
 
 class ErrorContext:
@@ -92,7 +92,7 @@ class Process:
 
         for function, when in self.__queued:
             self.__planned.add(function)
-            self.__reactor.schedule(function, when)
+            self.__reactor.receive(function, when)
         self.__queued = []
 
     def init(self):
@@ -112,21 +112,21 @@ class Process:
         for f in self.__planned:
             f.cancel()
 
-    def send_stop(self):
-        self.call(self.stop, schedule=URGENT)
+    def stop(self):
+        self.call(self._stop)
 
     def start(self):
         self._init()
         self.init()
         self.__react_all()
 
-    def stop(self):
+    def _stop(self):
         self.flush()
         self.__stopped = True
         self._terminate()
         self.terminate()
 
-    def call(self, function, *args, schedule=NORMAL, **kwds):
+    def call(self, function, *args, when=Reactor.NOW, **kwds):
         if self.__stopped:
             return
 
@@ -140,7 +140,7 @@ class Process:
             self.__planned.remove(func)
         func.add_cleanup_f(cleanup)
 
-        self.__queue_function(func, schedule)
+        self.__queue_function(func, when)
 
 
 class Port:
@@ -189,12 +189,11 @@ class Actor(Process):
         port = self.__ports[port_name]
         port.add_target(to_actor, to_operation)
 
-    def _add_callback(self, operation, function, message, schedule=NORMAL):
-        self.call(function, message, schedule=schedule)
+    def _add_callback(self, operation, function, message, when=Reactor.NOW):
+        self.call(function, message, when=when)
 
-    def send(self, operation, message, respond=None, urgent=False):
+    def send(self, operation, message, respond=None):
         handler = self.__handlers[operation]
-        schedule = URGENT if urgent else NORMAL
 
         f = handler
         if respond is not None:
@@ -203,10 +202,10 @@ class Actor(Process):
             @wraps(handler)
             def resp_wrap(msg):
                 handler(msg)
-                sender.send(respond_operation, self, urgent=urgent)
+                sender.send(respond_operation, self)
             f = resp_wrap
 
-        self._add_callback(operation, f, message, schedule=schedule)
+        self._add_callback(operation, f, message)
 
 
 class InterceptedMixin(Actor):
@@ -227,7 +226,7 @@ class InterceptedMixin(Actor):
     def after_execute(self, execution_id, operation, function, message):
         pass
 
-    def _add_callback(self, operation, function, message, schedule=NORMAL):
+    def _add_callback(self, operation, function, message, when=Reactor.NOW):
         execution_id = id(self.Id())
 
         # Because _add_callback is the only function, which is called from
@@ -242,7 +241,7 @@ class InterceptedMixin(Actor):
             function(message)
             self.after_execute(execution_id, operation, function, message)
 
-        super()._add_callback(operation, intercepted_function, message, schedule=schedule)
+        super()._add_callback(operation, intercepted_function, message, when=when)
 
 
 class MonitoredMixin(Actor):
@@ -275,7 +274,7 @@ class MonitoredMixin(Actor):
         if not self.is_supervised():
             raise err
 
-    def _add_callback(self, operation, function, message, schedule=NORMAL):
+    def _add_callback(self, operation, function, message, when=Reactor.NOW):
         @wraps(function)
         def try_function(message):
             error = None
@@ -289,7 +288,7 @@ class MonitoredMixin(Actor):
                 self.error_out.send(error_context)
                 self.on_error(error)
 
-        super()._add_callback(operation, try_function, message, schedule=schedule)
+        super()._add_callback(operation, try_function, message, when=when)
 
 
 class DelayableMixin(Actor):
@@ -317,7 +316,7 @@ class TimerMixin(Actor):
         super().set_reactor(reactor)
 
     def add_timeout(self, callback, after, message=None):
-        self._add_callback("_timeout", callback, message, schedule=after)
+        self._add_callback("_timeout", callback, message, when=after)
 
     def __after(self, msg):
         sender, operation, after = msg
@@ -431,7 +430,7 @@ class MeasuredMixin(InterceptedMixin, Actor):
 
 class SupervisorMixin(DelayableMixin, Actor):
 
-    def __init__(self, name, probe_period=30, timeout_period=10):
+    def __init__(self, name, children=[], probe_period=30, timeout_period=10):
         self.__supervised_actors = set()
 
         self.__ping_q = set()
@@ -450,9 +449,6 @@ class SupervisorMixin(DelayableMixin, Actor):
         if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
-        self.stop_sent = False
-
-
         super().__init__(name)
 
         self.add_handler("_error", self.error_received)
@@ -462,6 +458,11 @@ class SupervisorMixin(DelayableMixin, Actor):
         self.add_handler("_stop_check_failures", self.stop_check_failures)
         self.add_handler("_ping_check_failures", self.ping_check_failures)
         self.add_handler("_probe", self._probe)
+
+        self.stop_sent = False
+        for actor in children:
+            self.supervise(actor)
+
     
     def _init(self):
         self.delay("_probe", self.__probe_period)
@@ -489,12 +490,13 @@ class SupervisorMixin(DelayableMixin, Actor):
     def all_stopped(self, msg):
         pass
 
-    def start_children(self):
+    def start(self):
+        super().start()
         for actor in self.get_supervised():
             actor.start()
 
     # Stopping
-    def stop_children(self):
+    def stop(self):
         if not self.stop_sent:
             self.stop_sent = True
 
@@ -502,6 +504,7 @@ class SupervisorMixin(DelayableMixin, Actor):
             for actor in self.get_supervised():
                 self.__stop_q.add(actor)
                 actor.send("_stop", None, respond=(self, "_stop_received"), urgent=True)
+        super().stop()
 
     def _stop_received(self, actor):
         if actor in self.__stop_q:
