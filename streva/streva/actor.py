@@ -267,7 +267,7 @@ class MonitoredMixin(Actor):
         pass
 
     def __on_stop(self, msg):
-        self.send_stop()
+        self.stop()
 
     def on_error(self, err):
         # If there is no supervisor attached, then don't just pass the error
@@ -489,7 +489,7 @@ class SupervisorMixin(DelayableMixin, Actor):
         raise error
 
     def all_stopped(self, msg):
-        pass
+        self.stop()
 
     def start(self):
         super().start()
@@ -497,15 +497,14 @@ class SupervisorMixin(DelayableMixin, Actor):
             actor.start()
 
     # Stopping
-    def stop(self):
+    def stop_children(self):
         if not self.stop_sent:
             self.stop_sent = True
 
             self.delay("_stop_check_failures", self.__failure_timeout_period)
             for actor in self.get_supervised():
                 self.__stop_q.add(actor)
-                actor.send("_stop", None, respond=(self, "_stop_received"), urgent=True)
-        super().stop()
+                actor.send("_stop", None, respond=(self, "_stop_received"))
 
     def _stop_received(self, actor):
         if actor in self.__stop_q:
@@ -527,7 +526,7 @@ class SupervisorMixin(DelayableMixin, Actor):
 
             for actor in self.get_supervised():
                 self.__ping_q.add(actor)
-                actor.send("_ping", None, respond=(self, "_pong"), urgent=True)
+                actor.send("_ping", None, respond=(self, "_pong"))
 
             self.delay("_probe", self.__probe_period)
 

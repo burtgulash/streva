@@ -72,7 +72,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
             self.stopped = True
             self.stop_children()
 
-    def all_stopped(self, _):
+    def terminate(self):
         self.print_statistics()
         self.emperor.stop()
 
