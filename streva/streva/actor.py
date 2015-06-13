@@ -69,16 +69,16 @@ class Cancellable:
 class Process:
 
     def __init__(self, loop):
-        self._p_loop = loop
-        self._p_planned = set()
-        self._p_stopped = False
+        self.__loop = loop
+        self.__planned = set()
+        self.__stopped = False
 
         # Set up loop's lifecycle observation
-        self._p_loop.add_observer("start", self.init)
-        self._p_loop.add_observer("end", self.terminate)
+        self.__loop.add_observer("start", self.init)
+        self.__loop.add_observer("end", self.terminate)
 
     def get_loop(self):
-        return self._p_loop
+        return self.__loop
 
     def init(self):
         pass
@@ -87,7 +87,7 @@ class Process:
         pass
 
     def flush(self):
-        for f in self._p_planned:
+        for f in self.__planned:
             f.cancel()
 
     def send_stop(self):
@@ -95,10 +95,10 @@ class Process:
 
     def stop(self):
         self.flush()
-        self._p_stopped = True
+        self.__stopped = True
 
     def call(self, function, *args, schedule=NORMAL, **kwargs):
-        if not self._p_stopped:
+        if not self.__stopped:
             @wraps(function)
             def baked():
                 function(*args, **kwargs)
@@ -106,11 +106,11 @@ class Process:
             func = Cancellable(baked)
 
             def cleanup():
-                self._p_planned.remove(func)
+                self.__planned.remove(func)
             func.add_cleanup_f(cleanup)
 
-            self._p_planned.add(func)
-            self._p_loop.schedule(func, schedule)
+            self.__planned.add(func)
+            self.__loop.schedule(func, schedule)
 
 
 class Port:
@@ -135,14 +135,14 @@ class Actor(Process):
         super().__init__(loop)
         self.name = name
 
-        self._a_handlers = {}
-        self._a_ports = {}
+        self.__handlers = {}
+        self.__ports = {}
 
     def add_handler(self, operation, handler):
-        self._a_handlers[operation] = handler
+        self.__handlers[operation] = handler
 
     def add_port(self, port_name, port):
-        self._a_ports[port_name] = port
+        self.__ports[port_name] = port
 
     def make_port(self, port_name):
         port = Port(port_name)
@@ -150,7 +150,7 @@ class Actor(Process):
         return port
 
     def connect(self, port_name, to_actor, to_operation):
-        port = self._a_ports[port_name]
+        port = self.__ports[port_name]
         port._targets.append((to_actor, to_operation))
 
     def _add_callback(self, operation, function, message, schedule=NORMAL):
@@ -160,7 +160,7 @@ class Actor(Process):
         self._add_callback("_timeout", function, message, schedule=delay)
 
     def send(self, operation, message, respond=None, urgent=False):
-        handler = self._a_handlers[operation]
+        handler = self.__handlers[operation]
         schedule = URGENT if urgent else NORMAL
 
         f = handler
