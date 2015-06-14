@@ -268,6 +268,8 @@ class Process(ProcessBase, metaclass=ProcessMeta):
         self.call(function, message, when=when)
 
     def send(self, operation, message, respond=None):
+        if not isinstance(operation, str):
+            raise TypeError("Operation '{}' must be a string!".format(operation))
         handler = self.__handlers[operation]
 
         f = handler
