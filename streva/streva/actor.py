@@ -189,7 +189,6 @@ class Port(Enablable):
             self._enqueue(message)
 
 
-
 class HandlerMeta(type):
 
     @staticmethod
@@ -358,28 +357,17 @@ class Monitored(Actor):
         super()._add_callback(operation, try_function, message, when=when)
 
 
-class Delayable(Actor):
-
-    def __init__(self, name):
-        super().__init__(name)
-        self.__after_out = self.make_port("_after")
-
-    def connect_timer(self, timer_actor):
-        self.connect("_after", timer_actor, "_after")
-
-    def delay(self, operation, after):
-        self.__after_out.send((self, operation, after))
-
-
 class Timer(Actor):
-
-    def __init__(self, name):
-        super().__init__(name)
 
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
             raise TypeError("Loop for Timer must be TimedLoop instance!")
         super().set_reactor(reactor)
+
+    def register_timer(self, to_actor):
+        timer_port = to_actor.make_port("_my_timer")
+        to_actor.connect("_my_timer", self, "_after")
+        return timer_port
 
     def add_timeout(self, callback, after, message=None):
         self._add_callback("_timeout", callback, message, when=after)
@@ -495,10 +483,11 @@ class Measured(Intercepted, Actor):
         print(self.get_total_stats())
 
 
-class Supervisor(Delayable, Actor):
+class Supervisor(Actor):
 
-    def __init__(self, name, children=[], probe_period=30, timeout_period=10):
+    def __init__(self, name, timer, children=[], probe_period=30, timeout_period=10):
         super().__init__(name)
+        self.timer = timer.register_timer(self)
         self.__supervised_actors = set()
 
         self.__ping_q = set()
@@ -521,7 +510,7 @@ class Supervisor(Delayable, Actor):
         for actor in children:
             self.supervise(actor)
 
-        self.delay("_probe", self.__probe_period)
+        self.timer.send((self, "_probe", self.__probe_period))
 
     def supervise(self, actor):
         if not isinstance(actor, Monitored):
@@ -557,7 +546,7 @@ class Supervisor(Delayable, Actor):
         if not self.stop_sent:
             self.stop_sent = True
 
-            self.delay("_stop_check_failures", self.__failure_timeout_period)
+            self.timer.send((self, "_stop_check_failures", self.__failure_timeout_period))
             for actor in self.get_supervised():
                 self.__stop_q.add(actor)
                 actor.send("_stop", None, respond=(self, "_stop_received"))
@@ -587,7 +576,7 @@ class Supervisor(Delayable, Actor):
                 self.__ping_q.add(actor)
                 actor.send("_ping", None, respond=(self, "_pong"))
 
-            self.delay("_probe", self.__probe_period)
+            self.timer.send((self, "_probe", self.__probe_period))
 
     @handler_for("_pong")
     def _pong(self, actor):

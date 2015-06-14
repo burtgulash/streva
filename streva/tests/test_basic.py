@@ -1,7 +1,7 @@
 import queue
 
 import streva.reactor
-from streva.actor import Delayable, Timer, Measured, Monitored, Supervisor, Actor
+from streva.actor import Timer, Measured, Monitored, Supervisor, Actor
 from streva.reactor import LoopReactor, TimedReactor, Emperor
 
 
@@ -12,17 +12,19 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(Monitored, Delayable, Actor):
+class Producer(Monitored, Actor):
 
-    def __init__(self, name, to):
+    def __init__(self, name, timer, to):
         super().__init__(name)
         self.to = to
         self.count = 1
-        self.delay("produce", MARGINAL_DELAY)
+
+        self.timer = timer.register_timer(self)
+        self.timer.send((self, "produce", MARGINAL_DELAY))
 
     @handler_for("produce")
     def produce(self, msg):
-        self.delay("produce", MARGINAL_DELAY)
+        self.timer.send((self, "produce", MARGINAL_DELAY))
         self.to.send("receive", self.count)
         self.count += 1
 
@@ -35,17 +37,15 @@ class Consumer(Monitored, Actor):
             raise StopProduction
 
 
-class Supervisor(Supervisor, Timer, Actor):
+class Supervisor(Supervisor, Actor):
 
-    def __init__(self, name, emperor, children=[]):
-        super().__init__(name, children=children, timeout_period=.1, probe_period=.5)
-        self.stopped = False
+    def __init__(self, name, timer, emperor, children=[]):
+        super().__init__(name, timer, children=children, timeout_period=.1, probe_period=.5)
         self.emperor = emperor
 
     def error_received(self, error_context):
         error = error_context.get_exception()
-        if isinstance(error, StopProduction) and not self.stopped:
-            self.stopped = True
+        if isinstance(error, StopProduction):
             self.stop_children()
 
     def all_stopped(self, _):
@@ -55,25 +55,20 @@ class Supervisor(Supervisor, Timer, Actor):
 
 
 def test_count_to_100():
-    loop = LoopReactor()
-    timer_loop = TimedReactor()
-
     emp = Emperor()
 
     # Define actors
+    timer = Timer("timer")
     consumer = Consumer("consumer")
-    producer = Producer("producer", to=consumer)
-    supervisor = Supervisor("supervisor", emp, children=[producer, consumer])
-
-    producer.connect_timer(supervisor)
-    supervisor.connect_timer(supervisor)
+    producer = Producer("producer", timer, to=consumer)
+    supervisor = Supervisor("supervisor", timer, emp, children=[producer, consumer])
 
     # Register processes within reactors
-    producer.set_reactor(loop)
-    consumer.set_reactor(loop)
-    supervisor.set_reactor(timer_loop)
+    loop = LoopReactor(actors=[consumer, producer, supervisor])
+    timer_loop = TimedReactor(actors=[timer])
 
     supervisor.start()
+    timer.start()
 
     emp.add_reactor(loop)
     emp.add_reactor(timer_loop)

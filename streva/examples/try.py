@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import Delayable, Timer, Measured, Monitored, Supervisor, Actor, Stats
+from streva.actor import Timer, Measured, Monitored, Supervisor, Actor, Stats
 from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
@@ -13,20 +13,21 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(Measured, Monitored, Delayable, Actor):
+class Producer(Measured, Monitored, Actor):
 
-    def __init__(self, name):
+    def __init__(self, name, timer):
         super().__init__(name)
         self.out = self.make_port("out")
         self.count = 1
 
-        self.delay("produce", .00001)
+        self.timer = timer.register_timer(self)
+        self.timer.send((self, "produce", .00001))
 
     @handler_for("produce")
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.delay("produce", .01)
+        self.timer.send((self, "produce", .01))
 
 
 class Consumer(Measured, Monitored, Actor):
@@ -36,10 +37,14 @@ class Consumer(Measured, Monitored, Actor):
         logging.info("Count is: {}".format(msg))
 
 
-class Manager(Supervisor, Timer, Actor):
+class Timer(Monitored, Timer):
+    pass
 
-    def __init__(self, name, children=[]):
-        super().__init__(name, children=children, timeout_period=1.0, probe_period=4.0)
+
+class Manager(Supervisor):
+
+    def __init__(self, name, timer, children=[]):
+        super().__init__(name, timer, children=children, timeout_period=1.0, probe_period=4.0)
         self.stopped = False
         self.emperor = None
 
@@ -93,19 +98,17 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     # Define actors
+    timer = Timer("timer")
     consumer = Consumer("consumer")
-    producer = Producer("producer")
-    manager = Manager("manager", children=[consumer, producer])
+    producer = Producer("producer", timer)
+    manager = Manager("manager", timer, children=[timer, consumer, producer])
 
     producer.connect("out", consumer, "in")
-
-    producer.connect_timer(manager)
-    manager.connect_timer(manager)
     manager.start()
 
     # Define reactors
-    loop = LoopReactor(actors=[consumer, producer])
-    timer_loop = TimedReactor(actors=[manager])
+    loop = LoopReactor(actors=[manager, consumer, producer])
+    timer_loop = TimedReactor(actors=[timer])
 
     emp = Emperor(children=[loop, timer_loop])
     register_stop_signal(manager, emp)
