@@ -163,6 +163,26 @@ class ProcessBase(Enablable):
                 self._enqueue((func, when))
 
 
+class Proxy(Enablable):
+
+    def __init__(self, process, operation):
+        super().__init__()
+        self.process = process
+        self.operation = operation
+
+    def _process(self, message):
+        self.process.send(self.operation, message)
+
+    def send(self, msg):
+        if self.active():
+            self._process(msg)
+        else:
+            self._enqueue(msg)
+
+    def __repr__(self):
+        return "Proxy({}.{})".format(self.process, self.operation)
+
+
 class Port(Enablable):
     """ Port is a named set of processes to all of which an outbound message will
     be sent through this port.
@@ -260,6 +280,11 @@ class Process(ProcessBase, metaclass=ProcessMeta):
             port.activate()
         super().start()
 
+    def stop(self):
+        super().stop()
+        for port in self.__ports.values():
+            port.deactivate()
+
     def connect(self, port_name, to_process, to_operation):
         port = self.__ports[port_name]
         port.add_target(to_process, to_operation)
@@ -323,15 +348,25 @@ class Intercepted(Process):
 
 class Timer(Process):
 
+    def __init__(self):
+        super().__init__()
+        self.__proxy = Proxy(self, "_after")
+
+    def start(self):
+        self.__proxy.activate()
+        super().start()
+
+    def stop(self):
+        super().stop()
+        self.__proxy.deactivate()
+
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
             raise TypeError("Loop for Timer must be TimedLoop instance!")
         super().set_reactor(reactor)
 
-    def register_timer(self, to_process):
-        timer_port = to_process.make_port("_my_timer")
-        to_process.connect("_my_timer", self, "_after")
-        return timer_port
+    def timer_proxy(self):
+        return self.__proxy
 
     def add_timeout(self, callback, after, message=None):
         self._add_callback("_timeout", callback, message, when=after)
@@ -504,7 +539,7 @@ class Monitor(Process):
 
     def __init__(self, timer=None, probe_period=30, timeout_period=10):
         super().__init__()
-        self.timer = timer
+        self.__timer = timer
         self.__monitored_processes = set()
 
         self.__ping_q = set()
@@ -522,7 +557,7 @@ class Monitor(Process):
         if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
-        self.timer.send((self, "_probe", self.__probe_period))
+        self.__timer.send((self, "_probe", self.__probe_period))
 
     def monitor(self, process):
         self.__monitored_processes.add(process)
@@ -542,7 +577,7 @@ class Monitor(Process):
             self.__ping_q.add(process)
             process.send("_ping", (self, "_pong"))
 
-        self.timer.send((self, "_probe", self.__probe_period))
+        self.__timer.send((self, "_probe", self.__probe_period))
 
     @handler_for("_pong")
     def _pong(self, process):
@@ -565,7 +600,7 @@ class Supervisor(Process):
 
         self.STOP_FAILED_AFTER = 5.0
 
-        self.timer = timer
+        self.__timer = timer
 
     def spawn(self, actor):
         self.supervise(actor)
@@ -601,7 +636,7 @@ class Supervisor(Process):
 
     # Stopping
     def stop_children(self):
-        self.timer.send((self, "_stop_check_failures", self.STOP_FAILED_AFTER))
+        self.__timer.send((self, "_stop_check_failures", self.STOP_FAILED_AFTER))
         for process in self.get_supervised():
             self.__stop_q.add(process)
             process.send("_stop", (self, "_stop_received"))
@@ -634,7 +669,7 @@ class Root(Monitor, Supervisor, Timer, Process):
     def __init__(self):
         Process.__init__(self)
         Timer.__init__(self)
-        self.__timer = self.register_timer(self)
+        self.__timer = self.timer_proxy()
 
         Monitor.__init__(self, timer=self.__timer)
         Supervisor.__init__(self, timer=self.__timer)

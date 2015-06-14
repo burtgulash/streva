@@ -19,7 +19,7 @@ class Producer(Actor):
         self.to = to
         self.count = 1
 
-        self.timer = timer.register_timer(self)
+        self.timer = timer.timer_proxy()
         self.timer.send((self, "produce", MARGINAL_DELAY))
 
     @handler_for("produce")

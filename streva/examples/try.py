@@ -17,7 +17,7 @@ class Producer(Measured, Actor):
         self.out = self.make_port("out")
         self.count = 1
 
-        self.timer = timer.register_timer(self)
+        self.timer = timer
         self.timer.send((self, "produce", .00001))
 
     @handler_for("produce")
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     # Define actors
     root = Supervisor()
     consumer = Consumer()
-    producer = Producer(root)
+    producer = Producer(root.timer_proxy())
     producer.connect("out", consumer, "in")
 
     root.start()
