@@ -21,7 +21,7 @@ class Done(Exception):
 
 
 
-class UrgentQueue(queue.Queue):
+class SkipQueue(queue.Queue):
     """ Implementation of blocking queue which can queue urgent items to the
     beginning of the queue instead of at the end.
     """
@@ -45,7 +45,7 @@ class UrgentQueue(queue.Queue):
             self.queue.append(x)
 
 
-class TimedQueue(UrgentQueue):
+class TimedQueue(SkipQueue):
 
     def __init__(self):
         super().__init__()
@@ -87,8 +87,6 @@ class TimedQueue(UrgentQueue):
 
 class Reactor:
 
-    NOW = 0.0
-
     def __init__(self, processes=[]):
         self._queue = self._make_queue()
         self.__thread = None
@@ -97,7 +95,7 @@ class Reactor:
             self.set_process(process)
 
     def _make_queue(self):
-        return UrgentQueue()
+        return SkipQueue()
 
     def set_process(self, process):
         process.set_reactor(self)
@@ -128,7 +126,7 @@ class Reactor:
 
         wait.put((self, result))
 
-    def receive(self, function, **k):
+    def receive(self, function):
         self._queue.enqueue(function)
 
     def _react(self):
