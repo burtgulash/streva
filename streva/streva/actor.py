@@ -500,7 +500,7 @@ class Supervised(Process):
 
 class Monitor(Process):
 
-    def __init__(self, timer, probe_period=30, timeout_period=10):
+    def __init__(self, timer=None, probe_period=30, timeout_period=10):
         super().__init__()
         self.timer = timer
         self.__monitored_processes = set()
@@ -519,6 +519,8 @@ class Monitor(Process):
         # before next round of probing
         if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
+
+        self.timer.send((self, "_probe", self.__probe_period))
 
     def monitor(self, process):
         self.__monitored_processes.add(process)
@@ -554,7 +556,7 @@ class Monitor(Process):
 
 class Supervisor(Process):
 
-    def __init__(self, timer):
+    def __init__(self, timer=None):
         super().__init__()
         self.__supervised_processes = set()
         self.__stop_q = set()
@@ -562,9 +564,8 @@ class Supervisor(Process):
         self.STOP_FAILED_AFTER = 5.0
 
         self.timer = timer
-        self.timer.send((self, "_probe", self.__probe_period))
 
-    def spawn(actor):
+    def spawn(self, actor):
         self.supervise(actor)
         actor.start()
 
@@ -622,29 +623,21 @@ class Supervisor(Process):
 
 
 
-class Actor(Monitored, Supervisor, Supervised, Process):
-
-    def __init__(self):
-        Process.__init__()
-        Supervised.__init__()
-
-        self.timer = timer.register_timer(self)
-        Supervisor.__init__(self.timer)
-        
-        Monitored.__init__()
-
-    def timer(self):
-        return self.timer
-
+class Actor(Monitored, Supervised, Process):
+    pass
+     
 
 class Root(Monitor, Supervisor, Timer, Process):
 
     def __init__(self):
-        Process.__init__()
+        Process.__init__(self)
+        Timer.__init__(self)
+        self.__timer = self.register_timer(self)
 
-        Timer.__init__()
-        self.timer = self.register_timer(self)
+        Monitor.__init__(self, timer=self.__timer)
+        Supervisor.__init__(self, timer=self.__timer)
 
-        Supervisor.__init__(self.timer)
-        Monitor.__init__(self.timer)
+    def spawn(self, actor):
+        self.monitor(actor)
+        super().spawn(actor)
 
