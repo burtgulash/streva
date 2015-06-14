@@ -275,7 +275,7 @@ class Actor(Process, metaclass=HandlerMeta):
         self._add_callback(operation, f, message)
 
 
-class InterceptedMixin(Actor):
+class Intercepted(Actor):
 
     def __init__(self, name):
         super().__init__(name)
@@ -311,7 +311,7 @@ class InterceptedMixin(Actor):
         super()._add_callback(operation, intercepted_function, message, when=when)
 
 
-class MonitoredMixin(Actor):
+class Monitored(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
@@ -358,7 +358,7 @@ class MonitoredMixin(Actor):
         super()._add_callback(operation, try_function, message, when=when)
 
 
-class DelayableMixin(Actor):
+class Delayable(Actor):
 
     def __init__(self, name):
         super().__init__(name)
@@ -371,14 +371,14 @@ class DelayableMixin(Actor):
         self.__after_out.send((self, operation, after))
 
 
-class TimerMixin(Actor):
+class Timer(Actor):
 
     def __init__(self, name):
         super().__init__(name)
 
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
-            raise TypeError("Loop for TimerMixin must be TimedLoop instance!")
+            raise TypeError("Loop for Timer must be TimedLoop instance!")
         super().set_reactor(reactor)
 
     def add_timeout(self, callback, after, message=None):
@@ -435,7 +435,7 @@ class Stats:
             a.add(b.value)
 
 
-class MeasuredMixin(InterceptedMixin, Actor):
+class Measured(Intercepted, Actor):
 
     class Execution:
 
@@ -495,7 +495,7 @@ class MeasuredMixin(InterceptedMixin, Actor):
         print(self.get_total_stats())
 
 
-class SupervisorMixin(DelayableMixin, Actor):
+class Supervisor(Delayable, Actor):
 
     def __init__(self, name, children=[], probe_period=30, timeout_period=10):
         super().__init__(name)
@@ -524,8 +524,8 @@ class SupervisorMixin(DelayableMixin, Actor):
         self.delay("_probe", self.__probe_period)
 
     def supervise(self, actor):
-        if not isinstance(actor, MonitoredMixin):
-            raise Exception("For the actor '{}' to be supervised, add MonitoredMixin to its base classes".
+        if not isinstance(actor, Monitored):
+            raise Exception("For the actor '{}' to be supervised, add Monitored to its base classes".
                     format(actor.name))
 
         self.__supervised_actors.add(actor)

@@ -1,7 +1,7 @@
 import queue
 
 import streva.reactor
-from streva.actor import DelayableMixin, TimerMixin, MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor
+from streva.actor import Delayable, Timer, Measured, Monitored, Supervisor, Actor
 from streva.reactor import LoopReactor, TimedReactor, Emperor
 
 
@@ -12,7 +12,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(MonitoredMixin, DelayableMixin, Actor):
+class Producer(Monitored, Delayable, Actor):
 
     def __init__(self, name, to):
         super().__init__(name)
@@ -27,7 +27,7 @@ class Producer(MonitoredMixin, DelayableMixin, Actor):
         self.count += 1
 
 
-class Consumer(MonitoredMixin, Actor):
+class Consumer(Monitored, Actor):
 
     @handler_for("receive")
     def on_receive(self, msg):
@@ -35,7 +35,7 @@ class Consumer(MonitoredMixin, Actor):
             raise StopProduction
 
 
-class Supervisor(SupervisorMixin, TimerMixin, Actor):
+class Supervisor(Supervisor, Timer, Actor):
 
     def __init__(self, name, emperor, children=[]):
         super().__init__(name, children=children, timeout_period=.1, probe_period=.5)

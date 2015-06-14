@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import DelayableMixin, TimerMixin, MeasuredMixin, MonitoredMixin, SupervisorMixin, Actor, Stats
+from streva.actor import Delayable, Timer, Measured, Monitored, Supervisor, Actor, Stats
 from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
@@ -13,7 +13,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
+class Producer(Measured, Monitored, Delayable, Actor):
 
     def __init__(self, name):
         super().__init__(name)
@@ -29,21 +29,25 @@ class Producer(MeasuredMixin, MonitoredMixin, DelayableMixin, Actor):
         self.delay("produce", .01)
 
 
-class Consumer(MeasuredMixin, MonitoredMixin, Actor):
+class Consumer(Measured, Monitored, Actor):
 
     @handler_for("in")
     def on_receive(self, msg):
         logging.info("Count is: {}".format(msg))
 
 
-class Supervisor(SupervisorMixin, TimerMixin, Actor):
+class Supervisor(Supervisor, Timer, Actor):
 
     def __init__(self, name, children=[]):
         super().__init__(name, children=children, timeout_period=1.0, probe_period=4.0)
         self.stopped = False
+        self.emperor = None
+
+    def set_emperor(self, emperor):
+        self.emperor = emperor
 
     def error_received(self, error_context):
-        error = error_context.error
+        error = error_context.get_exception()
         logging.error(str(error_context))
         self.finish(None)
 
@@ -62,8 +66,7 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
         print(bottomline)
 
     @handler_for("finish")
-    def finish(self, emperor):
-        self.emperor = emperor
+    def finish(self, _):
         if not self.stopped:
             self.stopped = True
             self.stop_children()
@@ -76,8 +79,10 @@ class Supervisor(SupervisorMixin, TimerMixin, Actor):
 
 # Register keyinterrupt signals to be effective
 def register_stop_signal(supervisor, emperor):
+    supervisor.set_emperor(emperor)
+
     def signal_stop_handler(sig, frame):
-        supervisor.send("finish", emperor)
+        supervisor.send("finish", None)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
