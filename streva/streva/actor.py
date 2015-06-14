@@ -319,53 +319,6 @@ class Intercepted(Process):
         super()._add_callback(operation, intercepted_function, message, when=when)
 
 
-class Monitored(Process):
-    """ Allows the Process object to be monitored by supervisors.
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        self.supervisor = None
-        self.error_out = self.make_port("_error")
-
-    def set_supervisor(self, supervisor):
-        self.supervisor = supervisor
-
-    def is_supervised(self):
-        return self.supervisor is not None
-
-    @handler_for("_ping")
-    def __on_ping(self, msg):
-        pass
-
-    @handler_for("_stop")
-    def __on_stop(self, msg):
-        self.stop()
-
-    def on_error(self, err):
-        # If there is no supervisor attached, then don't just pass the error
-        # but raise it
-        if not self.is_supervised():
-            raise err
-
-    def _add_callback(self, operation, function, message, when=Reactor.NOW):
-        @wraps(function)
-        def try_function(message):
-            error = None
-            try:
-                function(message)
-            except Exception as err:
-                error = err
-
-            if error is not None:
-                error_context = ErrorContext(self, operation, message, error)
-                self.error_out.send(error_context)
-                self.on_error(error)
-
-        super()._add_callback(operation, try_function, message, when=when)
-
-
 class Timer(Process):
 
     def set_reactor(self, reactor):
@@ -492,15 +445,67 @@ class Measured(Intercepted, Process):
         print(self.get_total_stats())
 
 
-class Supervisor(Process):
+class Monitored(Process):
 
-    def __init__(self, timer, children=[], probe_period=30, timeout_period=10):
+    @handler_for("_ping")
+    def __on_ping(self, msg):
+        sender, operation = msg
+        sender.send(operation, self)
+
+
+class Supervised(Process):
+
+    def __init__(self):
         super().__init__()
-        self.timer = timer.register_timer(self)
-        self.__supervised_processes = set()
+        self.supervisor = None
+        self.__error_out = self.make_port("_error")
+
+    def set_supervisor(self, supervisor):
+        self.supervisor = supervisor
+
+    def get_supervisor(self):
+        return self.supervisor
+
+    def is_supervised(self):
+        return bool(self.supervisor)
+
+    def on_error(self, err):
+        # If there is no supervisor attached, then don't just pass the error
+        # but raise it
+        if not self.is_supervised():
+            raise err
+
+    def _add_callback(self, operation, function, message, when=Reactor.NOW):
+        @wraps(function)
+        def try_function(message):
+            error = None
+            try:
+                function(message)
+            except Exception as err:
+                error = err
+
+            if error is not None:
+                error_context = ErrorContext(self, operation, message, error)
+                self.__error_out.send(error_context)
+                self.on_error(error)
+
+        super()._add_callback(operation, try_function, message, when=when)
+
+    @handler_for("_stop")
+    def __on_stop(self, msg):
+        sender, operation = msg
+        self.stop()
+        sender.send(operation, self)
+
+
+class Monitor(Process):
+
+    def __init__(self, timer, probe_period=30, timeout_period=10):
+        super().__init__()
+        self.timer = timer
+        self.__monitored_processes = set()
 
         self.__ping_q = set()
-        self.__stop_q = set()
 
         # Probe all supervised actors regularly with this time period in
         # seconds
@@ -515,77 +520,25 @@ class Supervisor(Process):
         if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
-        self.stop_sent = False
-        for process in children:
-            self.supervise(process)
+    def monitor(self, process):
+        self.__monitored_processes.add(process)
 
-        self.timer.send((self, "_probe", self.__probe_period))
+    def get_monitored(self):
+        return iter(self.__monitored_processes)
 
-    def supervise(self, process):
-        if not isinstance(process, Monitored):
-            raise Exception("For the process '{}' to be supervised, add Monitored to its base classes".
-                    format(process.name))
-
-        self.__supervised_processes.add(process)
-        process.set_supervisor(self)
-        process.connect("_error", self, "_error")
-
-    def get_supervised(self):
-        return list(self.__supervised_processes)
-
-    def broadcast(self, operation, msg):
-        for process in self.get_supervised():
-            process.send(operation, msg)
-
-    @handler_for("_error")
-    def error_received(self, error_context):
-        process, error = error_context.process, error_context.get_exception()
-        raise error
-
-    def all_stopped(self, msg):
-        self.stop()
-
-    def start(self):
-        super().start()
-        for process in self.get_supervised():
-            process.start()
-
-    # Stopping
-    def stop_children(self):
-        if not self.stop_sent:
-            self.stop_sent = True
-
-            self.timer.send((self, "_stop_check_failures", self.__failure_timeout_period))
-            for process in self.get_supervised():
-                self.__stop_q.add(process)
-                process.send("_stop", None, respond=(self, "_stop_received"))
-
-    @handler_for("_stop_received")
-    def _stop_received(self, process):
-        if process in self.__stop_q:
-            self.__stop_q.remove(process)
-            if len(self.__stop_q) == 0:
-                self.all_stopped(None)
-
-    @handler_for("_stop_check_failures")
-    def stop_check_failures(self, _):
-        if len(self.__stop_q) > 0:
-            self.__stop_q = set()
-            logging.warning("""Killing everything ungracefully!
-{} processes haven't responded to stop request in {} s.""".format(len(self.__stop_q),
-                                                               self.__failure_timeout_period))
-        self.all_stopped(None)
+    def not_responding(self, process):
+        raise Exception("Process '{}' hasn't responded in {} seconds!".format(process.name,
+                                                                    self.__failure_timeout_period))
 
     @handler_for("_probe")
     def _probe(self, _):
-        if not self.stop_sent:
-            self.__ping_q = set()
+        self.__ping_q = set()
 
-            for process in self.get_supervised():
-                self.__ping_q.add(process)
-                process.send("_ping", None, respond=(self, "_pong"))
+        for process in self.get_monitored():
+            self.__ping_q.add(process)
+            process.send("_ping", (self, "_pong"))
 
-            self.timer.send((self, "_probe", self.__probe_period))
+        self.timer.send((self, "_probe", self.__probe_period))
 
     @handler_for("_pong")
     def _pong(self, process):
@@ -596,6 +549,102 @@ class Supervisor(Process):
     def ping_check_failures(self, _):
         for process in self.__ping_q:
             self.__ping_q.remove(process)
-            logging.error("Process '{}' hasn't responded in {} seconds!".format(process.name,
-                                                                    self.__failure_timeout_period))
+            self.not_responding(process)
+
+
+class Supervisor(Process):
+
+    def __init__(self, timer):
+        super().__init__()
+        self.__supervised_processes = set()
+        self.__stop_q = set()
+
+        self.STOP_FAILED_AFTER = 5.0
+
+        self.timer = timer
+        self.timer.send((self, "_probe", self.__probe_period))
+
+    def spawn(actor):
+        self.supervise(actor)
+        actor.start()
+
+    def supervise(self, process):
+        if not isinstance(process, Supervised):
+            raise Exception("For the process '{}' to be supervised, add Supervised to its base classes".
+                    format(process.name))
+
+        self.__supervised_processes.add(process)
+        process.set_supervisor(self)
+        process.connect("_error", self, "_error")
+
+    def get_supervised(self):
+        return iter(self.__supervised_processes)
+
+    @handler_for("_error")
+    def error_received(self, error_context):
+        process, error = error_context.process, error_context.get_exception()
+        raise error
+
+    def start(self):
+        super().start()
+        for process in self.get_supervised():
+            process.start()
+
+    def stop(self):
+        self.stop_children()
+
+    def all_stopped(self):
+        super().stop()
+
+    # Stopping
+    def stop_children(self):
+        self.timer.send((self, "_stop_check_failures", self.STOP_FAILED_AFTER))
+        for process in self.get_supervised():
+            self.__stop_q.add(process)
+            process.send("_stop", (self, "_stop_received"))
+
+    @handler_for("_stop_received")
+    def _stop_received(self, process):
+        if process in self.__stop_q:
+            self.__stop_q.remove(process)
+            if len(self.__stop_q) == 0:
+                self.all_stopped()
+
+    @handler_for("_stop_check_failures")
+    def stop_check_failures(self, _):
+        if len(self.__stop_q) > 0:
+            self.__stop_q = set()
+            logging.warning("""Killing everything ungracefully!
+{} processes haven't responded to stop request in {} s.""".format(len(self.__stop_q),
+                                                               self.__failure_timeout_period))
+        else:
+            self.all_stopped()
+
+
+
+class Actor(Monitored, Supervisor, Supervised, Process):
+
+    def __init__(self):
+        Process.__init__()
+        Supervised.__init__()
+
+        self.timer = timer.register_timer(self)
+        Supervisor.__init__(self.timer)
+        
+        Monitored.__init__()
+
+    def timer(self):
+        return self.timer
+
+
+class Root(Monitor, Supervisor, Timer, Process):
+
+    def __init__(self):
+        Process.__init__()
+
+        Timer.__init__()
+        self.timer = self.register_timer(self)
+
+        Supervisor.__init__(self.timer)
+        Monitor.__init__(self.timer)
 

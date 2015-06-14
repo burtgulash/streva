@@ -10,7 +10,7 @@ from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
 
-class Producer(Measured, Monitored, Process):
+class Producer(Measured, Actor):
 
     def __init__(self, timer):
         super().__init__()
@@ -35,12 +35,15 @@ class Consumer(Measured, Monitored, Process):
 
 
 
-class Supervisor(Supervisor):
+class Supervisor(Root):
 
-    def __init__(self, timer, children=[]):
-        super().__init__(timer, children=children, timeout_period=1.0, probe_period=4.0)
+    def __init__(self, children=[]):
+        super().__init__()
         self.stopped = False
         self.emperor = None
+
+        for child in children:
+            self.supervise(child)
 
     def set_emperor(self, emperor):
         self.emperor = emperor
@@ -92,19 +95,17 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
-    # Define processes
-    timer = Timer()
+    # Define actors
     consumer = Consumer()
-    producer = Producer(timer)
-    supervisor = Supervisor(timer, children=[consumer, producer])
+    producer = Producer(root)
+    root = Root(children=[consumer, producer])
 
     producer.connect("out", consumer, "in")
-    supervisor.start()
-    timer.start()
+    root.start()
 
     # Define reactors
-    loop = LoopReactor(processes=[supervisor, consumer, producer])
-    timer_loop = TimedReactor(processes=[timer])
+    loop = LoopReactor(processes=[consumer, producer])
+    timer_loop = TimedReactor(processes=[root])
 
     emp = Emperor(children=[loop, timer_loop])
     register_stop_signal(supervisor, emp)
