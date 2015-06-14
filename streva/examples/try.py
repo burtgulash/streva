@@ -12,8 +12,8 @@ from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 class Producer(Measured, Monitored, Actor):
 
-    def __init__(self, name, timer):
-        super().__init__(name)
+    def __init__(self, timer):
+        super().__init__()
         self.out = self.make_port("out")
         self.count = 1
 
@@ -37,8 +37,8 @@ class Consumer(Measured, Monitored, Actor):
 
 class Supervisor(Supervisor):
 
-    def __init__(self, name, timer, children=[]):
-        super().__init__(name, timer, children=children, timeout_period=1.0, probe_period=4.0)
+    def __init__(self, timer, children=[]):
+        super().__init__(timer, children=children, timeout_period=1.0, probe_period=4.0)
         self.stopped = False
         self.emperor = None
 
@@ -93,10 +93,10 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     # Define actors
-    timer = Timer("timer")
-    consumer = Consumer("consumer")
-    producer = Producer("producer", timer)
-    supervisor = Supervisor("supervisor", timer, children=[consumer, producer])
+    timer = Timer()
+    consumer = Consumer()
+    producer = Producer(timer)
+    supervisor = Supervisor(timer, children=[consumer, producer])
 
     producer.connect("out", consumer, "in")
     supervisor.start()

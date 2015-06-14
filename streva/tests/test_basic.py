@@ -14,8 +14,8 @@ class StopProduction(Exception):
 
 class Producer(Monitored, Actor):
 
-    def __init__(self, name, timer, to):
-        super().__init__(name)
+    def __init__(self, timer, to):
+        super().__init__()
         self.to = to
         self.count = 1
 
@@ -39,8 +39,8 @@ class Consumer(Monitored, Actor):
 
 class Supervisor(Supervisor, Actor):
 
-    def __init__(self, name, timer, children=[]):
-        super().__init__(name, timer, children=children, timeout_period=.1, probe_period=.5)
+    def __init__(self, timer, children=[]):
+        super().__init__(timer, children=children, timeout_period=.1, probe_period=.5)
         self.emperor = None
 
     def set_emperor(self, emperor):
@@ -59,10 +59,10 @@ class Supervisor(Supervisor, Actor):
 
 def test_count_to_100():
     # Define actors
-    timer = Timer("timer")
-    consumer = Consumer("consumer")
-    producer = Producer("producer", timer, to=consumer)
-    supervisor = Supervisor("supervisor", timer, children=[producer, consumer])
+    timer = Timer()
+    consumer = Consumer()
+    producer = Producer(timer, to=consumer)
+    supervisor = Supervisor(timer, children=[producer, consumer])
 
     # Define reactors
     loop = LoopReactor(actors=[consumer, producer, supervisor])

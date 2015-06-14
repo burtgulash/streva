@@ -189,7 +189,7 @@ class Port(Enablable):
             self._enqueue(message)
 
 
-class HandlerMeta(type):
+class ActorMeta(type):
 
     @staticmethod
     def handler_deco(handlers):
@@ -205,19 +205,26 @@ class HandlerMeta(type):
     # __init__ of each class when even overriden methods are known.
     def __prepare__(name, bases):
         actor_handlers = []
+
         for base in bases:
             if hasattr(base, "_actor_handlers"):
                 for handler_pair in base._actor_handlers:
                     actor_handlers.append(handler_pair)
-        handler_for = HandlerMeta.handler_deco(actor_handlers)
-        return {"_actor_handlers": actor_handlers, "handler_for": handler_for}
+
+        handler_for = ActorMeta.handler_deco(actor_handlers)
+
+        return {"_actor_handlers": actor_handlers,
+                "handler_for": handler_for,
+                "cls_name": name,
+                "_ids": 0}
 
 
-class Actor(Process, metaclass=HandlerMeta):
+class Actor(Process, metaclass=ActorMeta):
 
-    def __init__(self, name):
+    def __init__(self):
         super().__init__()
-        self.name = name
+        self.name = "{} #{}".format(self.cls_name, self.__class__._ids)
+        self.__class__._ids += 1
 
         self.__handlers = {}
         self.__ports = {}
@@ -232,6 +239,8 @@ class Actor(Process, metaclass=HandlerMeta):
 
             self.add_handler(operation, method)
 
+    def set_name(self, name):
+        self.name = name
 
     def add_handler(self, operation, handler):
         if operation in self.__handlers:
@@ -276,8 +285,8 @@ class Actor(Process, metaclass=HandlerMeta):
 
 class Intercepted(Actor):
 
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self):
+        super().__init__()
         self.__intercept_lock = threading.Lock()
 
     class Id:
@@ -314,8 +323,8 @@ class Monitored(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self):
+        super().__init__()
 
         self.supervisor = None
         self.error_out = self.make_port("_error")
@@ -431,8 +440,8 @@ class Measured(Intercepted, Actor):
             self.planned_at = None
             self.started_at = None
 
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self):
+        super().__init__()
 
         self.last_updated = time.time()
         self.__stats = {}
@@ -485,8 +494,8 @@ class Measured(Intercepted, Actor):
 
 class Supervisor(Actor):
 
-    def __init__(self, name, timer, children=[], probe_period=30, timeout_period=10):
-        super().__init__(name)
+    def __init__(self, timer, children=[], probe_period=30, timeout_period=10):
+        super().__init__()
         self.timer = timer.register_timer(self)
         self.__supervised_actors = set()
 

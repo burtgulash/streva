@@ -11,7 +11,7 @@ class Test(Actor):
         assert msg == "TEST"
 
 def setup():
-    return Test("tester"), Reactor()
+    return Test(), Reactor()
 
 
 @pytest.mark.timeout(1)
