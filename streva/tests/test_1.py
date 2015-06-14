@@ -6,10 +6,7 @@ import pytest
 
 class Test(Actor):
 
-    def __init__(self, name):
-        super().__init__(name)
-        self.add_handler("receive", self.receive)
-
+    @handler_for("receive")
     def receive(self, msg):
         assert msg == "TEST"
 

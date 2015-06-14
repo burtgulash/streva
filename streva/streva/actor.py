@@ -190,16 +190,31 @@ class Port(Enablable):
 
 
 
-def handler_deco(handlers):
-    def bake_in(operation=""):
-        def decorator(func):
-            handlers.append((operation, func))
-            return func
-        return decorator
-    return bake_in
+class HandlerMeta(type):
+
+    @staticmethod
+    def handler_deco(handlers):
+        def bake_in(operation):
+            def decorator(func):
+                handlers.append((operation, func))
+                return func
+            return decorator
+        return bake_in
+
+    # Register 'handler_for' decorator and make it put all recognized handlers
+    # to class attribute "actor_handlers". Handlers will then be registered in
+    # __init__ of each class when even overriden methods are known.
+    def __prepare__(name, bases):
+        actor_handlers = []
+        for base in bases:
+            if hasattr(base, "actor_handlers"):
+                for handler_pair in base.actor_handlers:
+                    actor_handlers.append(handler_pair)
+        handler_for = HandlerMeta.handler_deco(actor_handlers)
+        return {"actor_handlers": actor_handlers, "handler_for": handler_for}
 
 
-class Actor(Process):
+class Actor(Process, metaclass=HandlerMeta):
 
     def __init__(self, name):
         super().__init__()
@@ -208,14 +223,21 @@ class Actor(Process):
         self.__handlers = {}
         self.__ports = {}
 
+        for operation, func in self.actor_handlers:
+            # Preferably get overriden method by name from instance
+            method = getattr(self, func.__name__, None)
+
+            # Method is private, turn function into method
+            if not method:
+                method = func.__get__(self, type(self))
+
+            self.add_handler(operation, method)
+
+
     def add_handler(self, operation, handler):
         if operation in self.__handlers:
             raise ValueError("Handler for '{}' already exists!".format(operation))
         self.__handlers[operation] = handler
-
-    def add_handlers(self, handlers):
-        for operation, handler in handlers:
-            self.add_handler(operation, handler.__get__(self, type(self)))
 
     def add_port(self, port_name, port):
         self.__ports[port_name] = port
@@ -293,12 +315,8 @@ class MonitoredMixin(Actor):
     """ Allows the Actor object to be monitored by supervisors.
     """
 
-    __hs = []
-    handler_for = handler_deco(__hs)
-
     def __init__(self, name):
         super().__init__(name)
-        self.add_handlers(self.__hs)
 
         self.supervisor = None
         self.error_out = self.make_port("_error")
@@ -355,12 +373,8 @@ class DelayableMixin(Actor):
 
 class TimerMixin(Actor):
 
-    __hs = []
-    handler_for = handler_deco(__hs)
-
     def __init__(self, name):
         super().__init__(name)
-        self.add_handlers(self.__hs)
 
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
@@ -483,12 +497,8 @@ class MeasuredMixin(InterceptedMixin, Actor):
 
 class SupervisorMixin(DelayableMixin, Actor):
 
-    __hs = []
-    handler_for = handler_deco(__hs)
-
     def __init__(self, name, children=[], probe_period=30, timeout_period=10):
         super().__init__(name)
-        self.add_handlers(self.__hs)
         self.__supervised_actors = set()
 
         self.__ping_q = set()
@@ -511,7 +521,6 @@ class SupervisorMixin(DelayableMixin, Actor):
         for actor in children:
             self.supervise(actor)
 
-        self.add_handler("_error", self.error_received)
         self.delay("_probe", self.__probe_period)
 
     def supervise(self, actor):
@@ -530,6 +539,7 @@ class SupervisorMixin(DelayableMixin, Actor):
         for actor in self.get_supervised():
             actor.send(operation, msg)
 
+    @handler_for("_error")
     def error_received(self, error_context):
         actor, error = error_context.actor, error_context.get_exception()
         raise error

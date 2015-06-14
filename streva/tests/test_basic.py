@@ -16,11 +16,11 @@ class Producer(MonitoredMixin, DelayableMixin, Actor):
 
     def __init__(self, name, to):
         super().__init__(name)
-        self.add_handler("produce", self.produce)
         self.to = to
         self.count = 1
         self.delay("produce", MARGINAL_DELAY)
 
+    @handler_for("produce")
     def produce(self, msg):
         self.delay("produce", MARGINAL_DELAY)
         self.to.send("receive", self.count)
@@ -29,10 +29,7 @@ class Producer(MonitoredMixin, DelayableMixin, Actor):
 
 class Consumer(MonitoredMixin, Actor):
 
-    def __init__(self, name):
-        super().__init__(name)
-        self.add_handler("receive", self.on_receive)
-
+    @handler_for("receive")
     def on_receive(self, msg):
         if msg > 100:
             raise StopProduction
