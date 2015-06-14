@@ -207,11 +207,11 @@ class HandlerMeta(type):
     def __prepare__(name, bases):
         actor_handlers = []
         for base in bases:
-            if hasattr(base, "actor_handlers"):
-                for handler_pair in base.actor_handlers:
+            if hasattr(base, "_actor_handlers"):
+                for handler_pair in base._actor_handlers:
                     actor_handlers.append(handler_pair)
         handler_for = HandlerMeta.handler_deco(actor_handlers)
-        return {"actor_handlers": actor_handlers, "handler_for": handler_for}
+        return {"_actor_handlers": actor_handlers, "handler_for": handler_for}
 
 
 class Actor(Process, metaclass=HandlerMeta):
@@ -223,7 +223,7 @@ class Actor(Process, metaclass=HandlerMeta):
         self.__handlers = {}
         self.__ports = {}
 
-        for operation, func in self.actor_handlers:
+        for operation, func in self._actor_handlers:
             # Preferably get overriden method by name from instance
             method = getattr(self, func.__name__, None)
 
