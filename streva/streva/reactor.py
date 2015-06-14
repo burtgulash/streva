@@ -76,16 +76,58 @@ class UrgentQueue(queue.Queue):
             self.queue.append(x)
 
 
+class TimedQueue(UrgentQueue):
+
+    def __init__(self):
+        super().__init__()
+        self.delayed = []
+        self._WAIT = .1
+
+    def enqueue(self, x, delayed=0):
+        super().enqueue((x, delayed), urgent=delayed > 0)
+
+    def dequeue(self, block=True, timeout=None):
+        while True:
+            now = time.time()
+            timeout = self._WAIT
+
+            if self.delayed:
+                nearest = self._delayed[0]
+                timeout = max(0, nearest[1] - now)
+
+            try:
+                x, delay = super().dequeue(block=block, timeout=timeout)
+            except queue.Empty:
+                if not block:
+                    raise
+            else:
+                if delay > 0:
+                    heapq.heappush(self.delayed, (delay, x))
+                else:
+                    return x
+
+            delayed = []
+            while self.delayed and self.delayed[0][1] <= now:
+                delay, x = heapq.heappop(self.delayed)
+                delayed.append(x)
+            while delayed:
+                x = delayed.pop()
+                super().enqueue((x, 0))
+
+
 class Reactor:
 
     NOW = 0.0
 
     def __init__(self, processes=[]):
-        self._queue = UrgentQueue()
+        self._queue = self._make_queue()
         self.__thread = None
 
         for process in processes:
             self.set_process(process)
+
+    def _make_queue(self):
+        return UrgentQueue()
 
     def set_process(self, process):
         process.set_reactor(self)
@@ -116,16 +158,12 @@ class Reactor:
 
         wait.put((self, result))
 
-    def receive(self, function, when):
-        event = Event(function)
-        self._schedule(event)
-
-    def _schedule(self, event, skip=False):
-        self._queue.enqueue(event, urgent=skip)
+    def receive(self, function):
+        self._queue.enqueue(function)
 
     def _react(self):
-        event = self._queue.dequeue()
-        event.function()
+        function = self._queue.dequeue()
+        function()
 
 
 class LoopReactor(Reactor):
@@ -138,7 +176,7 @@ class LoopReactor(Reactor):
         self.__running = False
 
         # Flush the queue with empty event
-        self.receive(lambda: None, Reactor.NOW)
+        self.receive(lambda: None)
 
     def _react(self):
         self.__running = True
@@ -146,55 +184,25 @@ class LoopReactor(Reactor):
             self._iteration()
 
     def _iteration(self):
-        event = self._queue.get()
-        event.function()
+        function = self._queue.dequeue()
+        function()
 
 
 class TimedReactor(LoopReactor):
 
-    def __init__(self, processes=[]):
-        super().__init__(processes=processes)
+    def _make_queue(self):
+        return TimedQueue()
 
-        # To avoid busy waiting, wait this number of seconds if there is no
-        # event to process in an iteration.
-        self._WAIT_ON_EMPTY = .5
-        self._delayed = []
-
-    def receive(self, function, when):
-        if when > 0:
-            event = DelayedEvent(function, when)
-            self._schedule(event, skip=True)
-        elif when == 0:
-            super().receive(function, when)
+    def receive(self, function, delay=0):
+        if delay > 0:
+            self._schedule(function, delay)
+        elif delay == 0:
+            self._schedule(function)
         else:
-            raise ValueError("'when' must be a non-negative number!")
+            raise ValueError("'delay' must be a non-negative number!")
 
-    def _iteration(self):
-        now = time.time()
-
-        timeout = self._WAIT_ON_EMPTY
-        # Find timeout - time to nearest scheduled timeout or default
-        # to WAIT_ON_EMPTY queue period
-        if self._delayed:
-            timeout = max(0, self._delayed[0].deadline - now)
-
-        try:
-            event = self._queue.dequeue(timeout=timeout)
-        except queue.Empty:
-            # Timeout obtained means that a delayed event came before
-            # an event from the queue
-            pass
-        else:
-            if isinstance(event, DelayedEvent):
-                heapq.heappush(self._delayed, event)
-            else:
-                event.function()
-
-        # Delayed events are processed after normal events, so that urgent
-        # messages are processed first
-        while self._delayed and self._delayed[0].deadline <= now:
-            delayed = heapq.heappop(self._delayed)
-            delayed.function()
+    def receive(self, function, delay=0):
+        self._queue.enqueue(function, delay=delay)
 
 
 class Emperor:
