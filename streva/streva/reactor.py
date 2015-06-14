@@ -149,11 +149,8 @@ class LoopReactor(Reactor):
     def _react(self):
         self.__running = True
         while self.__running:
-            self._iteration()
-
-    def _iteration(self):
-        function = self._queue.dequeue()
-        function()
+            function = self._queue.dequeue()
+            function()
 
 
 class TimedReactor(LoopReactor):

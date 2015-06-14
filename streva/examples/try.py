@@ -17,14 +17,14 @@ class Producer(Measured, Actor):
         self.out = self.make_port("out")
         self.count = 1
 
+        self.send("produce", None)
         self.timer = timer
-        self.timer.send((self, "produce", .00001))
 
     @handler_for("produce")
     def produce(self, msg):
         self.out.send(self.count)
         self.count += 1
-        self.timer.send((self, "produce", .01))
+        self.timer.send((self, "produce", 0.05))
 
 
 class Consumer(Measured, Actor):
