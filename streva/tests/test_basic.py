@@ -39,8 +39,11 @@ class Consumer(Monitored, Actor):
 
 class Supervisor(Supervisor, Actor):
 
-    def __init__(self, name, timer, emperor, children=[]):
+    def __init__(self, name, timer, children=[]):
         super().__init__(name, timer, children=children, timeout_period=.1, probe_period=.5)
+        self.emperor = None
+
+    def set_emperor(self, emperor):
         self.emperor = emperor
 
     def error_received(self, error_context):
@@ -55,23 +58,21 @@ class Supervisor(Supervisor, Actor):
 
 
 def test_count_to_100():
-    emp = Emperor()
-
     # Define actors
     timer = Timer("timer")
     consumer = Consumer("consumer")
     producer = Producer("producer", timer, to=consumer)
-    supervisor = Supervisor("supervisor", timer, emp, children=[producer, consumer])
+    supervisor = Supervisor("supervisor", timer, children=[producer, consumer])
 
-    # Register processes within reactors
+    # Define reactors
     loop = LoopReactor(actors=[consumer, producer, supervisor])
     timer_loop = TimedReactor(actors=[timer])
 
+    emp = Emperor(children=[loop, timer_loop])
+    supervisor.set_emperor(emp)
+
     supervisor.start()
     timer.start()
-
-    emp.add_reactor(loop)
-    emp.add_reactor(timer_loop)
 
     emp.start()
     emp.join()

@@ -9,9 +9,6 @@ from streva.actor import Timer, Measured, Monitored, Supervisor, Actor, Stats
 from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
-class StopProduction(Exception):
-    pass
-
 
 class Producer(Measured, Monitored, Actor):
 
@@ -37,11 +34,8 @@ class Consumer(Measured, Monitored, Actor):
         logging.info("Count is: {}".format(msg))
 
 
-class Timer(Monitored, Timer):
-    pass
 
-
-class Manager(Supervisor):
+class Supervisor(Supervisor):
 
     def __init__(self, name, timer, children=[]):
         super().__init__(name, timer, children=children, timeout_period=1.0, probe_period=4.0)
@@ -55,6 +49,16 @@ class Manager(Supervisor):
         error = error_context.get_exception()
         logging.error(str(error_context))
         self.finish(None)
+
+    @handler_for("finish")
+    def finish(self, _):
+        if not self.stopped:
+            self.stopped = True
+            self.stop_children()
+
+    def terminate(self):
+        self.print_statistics()
+        self.emperor.stop()
 
     def print_statistics(self):
         bottomline = Stats("TOTAL RUN STATISTICS")
@@ -70,24 +74,15 @@ class Manager(Supervisor):
         print("\n--------------------------------------------------")
         print(bottomline)
 
-    @handler_for("finish")
-    def finish(self, _):
-        if not self.stopped:
-            self.stopped = True
-            self.stop_children()
-
-    def terminate(self):
-        self.print_statistics()
-        self.emperor.stop()
 
 
 
 # Register keyinterrupt signals to be effective
-def register_stop_signal(manager, emperor):
-    manager.set_emperor(emperor)
+def register_stop_signal(supervisor, emperor):
+    supervisor.set_emperor(emperor)
 
     def signal_stop_handler(sig, frame):
-        manager.send("finish", None)
+        supervisor.send("finish", None)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
@@ -101,17 +96,19 @@ if __name__ == "__main__":
     timer = Timer("timer")
     consumer = Consumer("consumer")
     producer = Producer("producer", timer)
-    manager = Manager("manager", timer, children=[timer, consumer, producer])
+    supervisor = Supervisor("supervisor", timer, children=[consumer, producer])
 
     producer.connect("out", consumer, "in")
-    manager.start()
+    supervisor.start()
+    timer.start()
 
     # Define reactors
-    loop = LoopReactor(actors=[manager, consumer, producer])
+    loop = LoopReactor(actors=[supervisor, consumer, producer])
     timer_loop = TimedReactor(actors=[timer])
 
     emp = Emperor(children=[loop, timer_loop])
-    register_stop_signal(manager, emp)
+    register_stop_signal(supervisor, emp)
+
     emp.start()
     emp.join()
 
