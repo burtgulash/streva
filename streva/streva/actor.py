@@ -122,9 +122,9 @@ class ProcessBase(Enablable):
         if not self.__reactor:
             raise ValueError("Loop must be set before starting the process.!")
 
-        function, when = message
+        function, k = message
         self.__planned.add(function)
-        self.__reactor.receive(function, when)
+        self.__reactor.receive(function, **k)
 
     def terminate(self):
         pass
@@ -135,20 +135,20 @@ class ProcessBase(Enablable):
             f.cancel()
 
     def stop(self):
-        self.call(self._stop)
+        self.call(self._stop, None)
 
     def start(self):
         self.__stopped = False
 
-    def _stop(self):
+    def _stop(self, _):
         self.flush()
         self.terminate()
         self.__stopped = True
 
-    def call(self, function, *args, when=Reactor.NOW, **kwds):
+    def call(self, function, msg, **k):
         @wraps(function)
         def baked():
-            function(*args, **kwds)
+            function(msg)
 
         func = Cancellable(baked)
 
@@ -158,9 +158,9 @@ class ProcessBase(Enablable):
 
         if not self.__stopped:
             if self.active():
-                self._process((func, when))
+                self._process((func, k))
             else:
-                self._enqueue((func, when))
+                self._enqueue((func, k))
 
 
 class Proxy(Enablable):
@@ -289,8 +289,8 @@ class Process(ProcessBase, metaclass=ProcessMeta):
         port = self.__ports[port_name]
         port.add_target(to_process, to_operation)
 
-    def _add_callback(self, operation, function, message, when=Reactor.NOW):
-        self.call(function, message, when=when)
+    def _add_callback(self, operation, function, message, **k):
+        self.call(function, message, **k)
 
     def send(self, operation, message, respond=None):
         if not isinstance(operation, str):
@@ -328,7 +328,7 @@ class Intercepted(Process):
     def after_execute(self, execution_id, operation, function, message):
         pass
 
-    def _add_callback(self, operation, function, message, when=Reactor.NOW):
+    def _add_callback(self, operation, function, message, **k):
         execution_id = id(self.Id())
 
         # Because _add_callback is the only function, which is called from
@@ -343,7 +343,7 @@ class Intercepted(Process):
             function(message)
             self.after_execute(execution_id, operation, function, message)
 
-        super()._add_callback(operation, intercepted_function, message, when=when)
+        super()._add_callback(operation, intercepted_function, message, **k)
 
 
 class Timer(Process):
@@ -369,7 +369,7 @@ class Timer(Process):
         return self.__proxy
 
     def add_timeout(self, callback, after, message=None):
-        self._add_callback("_timeout", callback, message, when=after)
+        self._add_callback("_timeout", callback, message, delay=after)
 
     @handler_for("_after")
     def __after(self, msg):
@@ -512,7 +512,7 @@ class Supervised(Process):
         if not self.is_supervised():
             raise err
 
-    def _add_callback(self, operation, function, message, when=Reactor.NOW):
+    def _add_callback(self, operation, function, message, **k):
         @wraps(function)
         def try_function(message):
             error = None
@@ -526,7 +526,7 @@ class Supervised(Process):
                 self.__error_out.send(error_context)
                 self.on_error(error)
 
-        super()._add_callback(operation, try_function, message, when=when)
+        super()._add_callback(operation, try_function, message, **k)
 
     @handler_for("_stop")
     def __on_stop(self, msg):

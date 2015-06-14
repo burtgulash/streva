@@ -20,37 +20,6 @@ class Done(Exception):
     pass
 
 
-class Event:
-
-    __slots__ = "function"
-
-    def __init__(self, function):
-        self.function = function
-
-    def __repr__(self):
-        return "Event({})".format(self.function)
-
-
-class DelayedEvent(Event):
-
-    __slots__ = "deadline", "delay"
-
-    def __init__(self, function, delay):
-        super().__init__(function)
-        self.deadline = time.time()
-        self.delay = delay or 0
-        if delay and delay >= 0:
-            self.deadline += delay
-
-    def __lt__(self, other):
-        return self.deadline < other.deadline
-
-    def __le__(self, other):
-        return self.deadline <= other.deadline
-
-    def __repr__(self):
-        return "DelayedEvent({}, after={})".format(self.function, self.delay)
-
 
 class UrgentQueue(queue.Queue):
     """ Implementation of blocking queue which can queue urgent items to the
@@ -83,8 +52,9 @@ class TimedQueue(UrgentQueue):
         self.delayed = []
         self._WAIT = .1
 
-    def enqueue(self, x, delayed=0):
-        super().enqueue((x, delayed), urgent=delayed > 0)
+    def enqueue(self, x, delay=0):
+        deadline = time.time() + delay
+        super().enqueue((deadline, delay, x), urgent=delay > 0)
 
     def dequeue(self, block=True, timeout=None):
         while True:
@@ -92,27 +62,27 @@ class TimedQueue(UrgentQueue):
             timeout = self._WAIT
 
             if self.delayed:
-                nearest = self._delayed[0]
-                timeout = max(0, nearest[1] - now)
+                nearest = self.delayed[0]
+                timeout = max(0, nearest[0] - now)
 
             try:
-                x, delay = super().dequeue(block=block, timeout=timeout)
+                deadline, delay, x = super().dequeue(block=block, timeout=timeout)
             except queue.Empty:
                 if not block:
                     raise
             else:
                 if delay > 0:
-                    heapq.heappush(self.delayed, (delay, x))
+                    heapq.heappush(self.delayed, (deadline, x))
                 else:
                     return x
 
             delayed = []
-            while self.delayed and self.delayed[0][1] <= now:
+            while self.delayed and self.delayed[0][0] <= now:
                 delay, x = heapq.heappop(self.delayed)
                 delayed.append(x)
             while delayed:
                 x = delayed.pop()
-                super().enqueue((x, 0))
+                super().enqueue((0, 0, x))
 
 
 class Reactor:
@@ -158,7 +128,7 @@ class Reactor:
 
         wait.put((self, result))
 
-    def receive(self, function):
+    def receive(self, function, **k):
         self._queue.enqueue(function)
 
     def _react(self):
@@ -194,15 +164,10 @@ class TimedReactor(LoopReactor):
         return TimedQueue()
 
     def receive(self, function, delay=0):
-        if delay > 0:
-            self._schedule(function, delay)
-        elif delay == 0:
-            self._schedule(function)
+        if delay >= 0:
+            self._queue.enqueue(function, delay=delay)
         else:
             raise ValueError("'delay' must be a non-negative number!")
-
-    def receive(self, function, delay=0):
-        self._queue.enqueue(function, delay=delay)
 
 
 class Emperor:
