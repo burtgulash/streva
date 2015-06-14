@@ -5,12 +5,12 @@ import queue
 import signal
 import threading
 
-from streva.actor import Timer, Measured, Monitored, Supervisor, Actor, Stats
+from streva.actor import Timer, Measured, Monitored, Supervisor, Process, Stats
 from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
 
-class Producer(Measured, Monitored, Actor):
+class Producer(Measured, Monitored, Process):
 
     def __init__(self, timer):
         super().__init__()
@@ -27,7 +27,7 @@ class Producer(Measured, Monitored, Actor):
         self.timer.send((self, "produce", .01))
 
 
-class Consumer(Measured, Monitored, Actor):
+class Consumer(Measured, Monitored, Process):
 
     @handler_for("in")
     def on_receive(self, msg):
@@ -62,13 +62,13 @@ class Supervisor(Supervisor):
 
     def print_statistics(self):
         bottomline = Stats("TOTAL RUN STATISTICS")
-        for actor in self.get_supervised():
+        for process in self.get_supervised():
             try:
-                actor.print_stats()
-                bottomline.add(actor.get_total_stats())
+                process.print_stats()
+                bottomline.add(process.get_total_stats())
             except AttributeError:
-                # Some actors need not have get_stats() because they are
-                # not MeasuredActor
+                # Some processes need not have get_stats() because they are
+                # not MeasuredProcess
                 pass
 
         print("\n--------------------------------------------------")
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
-    # Define actors
+    # Define processes
     timer = Timer()
     consumer = Consumer()
     producer = Producer(timer)
@@ -103,8 +103,8 @@ if __name__ == "__main__":
     timer.start()
 
     # Define reactors
-    loop = LoopReactor(actors=[supervisor, consumer, producer])
-    timer_loop = TimedReactor(actors=[timer])
+    loop = LoopReactor(processes=[supervisor, consumer, producer])
+    timer_loop = TimedReactor(processes=[timer])
 
     emp = Emperor(children=[loop, timer_loop])
     register_stop_signal(supervisor, emp)

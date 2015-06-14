@@ -10,8 +10,8 @@ from streva.reactor import Reactor, TimedReactor
 
 class ErrorContext:
 
-    def __init__(self, actor, operation, message, error):
-        self.actor = actor
+    def __init__(self, process, operation, message, error):
+        self.process = process
         self.operation = operation
         self.message = message
         self.error = error
@@ -27,8 +27,8 @@ class ErrorContext:
     def __str__(self):
         return """
 
-ERROR happened when actor  '{}.{}'  was sent message  '{}':
-{}""".format(self.actor.name, self.operation,
+ERROR happened when process  '{}.{}'  was sent message  '{}':
+{}""".format(self.process.name, self.operation,
              str(self.message)[:30],
              self._exc_traceback())
 
@@ -98,7 +98,7 @@ class Enablable:
         self.__active = False
 
 
-class Process(Enablable):
+class ProcessBase(Enablable):
 
     def __init__(self):
         super().__init__()
@@ -164,7 +164,7 @@ class Process(Enablable):
 
 
 class Port(Enablable):
-    """ Port is a named set of actors to all of which an outbound message will
+    """ Port is a named set of processes to all of which an outbound message will
     be sent through this port.
 
     Port implements pubsub routing.
@@ -175,12 +175,12 @@ class Port(Enablable):
         self.name = name
         self.__targets = []
 
-    def add_target(self, actor, operation):
-        self.__targets.append((actor, operation))
+    def add_target(self, process, operation):
+        self.__targets.append((process, operation))
 
     def _process(self, message):
-        for target_actor, operation in self.__targets:
-            target_actor.send(operation, message)
+        for target_process, operation in self.__targets:
+            target_process.send(operation, message)
 
     def send(self, message):
         if self.active():
@@ -189,7 +189,7 @@ class Port(Enablable):
             self._enqueue(message)
 
 
-class ActorMeta(type):
+class ProcessMeta(type):
 
     @staticmethod
     def handler_deco(handlers):
@@ -201,25 +201,25 @@ class ActorMeta(type):
         return bake_in
 
     # Register 'handler_for' decorator and make it put all recognized handlers
-    # to class attribute "actor_handlers". Handlers will then be registered in
+    # to class attribute "process_handlers". Handlers will then be registered in
     # __init__ of each class when even overriden methods are known.
     def __prepare__(name, bases):
-        actor_handlers = []
+        process_handlers = []
 
         for base in bases:
-            if hasattr(base, "_actor_handlers"):
-                for handler_pair in base._actor_handlers:
-                    actor_handlers.append(handler_pair)
+            if hasattr(base, "_process_handlers"):
+                for handler_pair in base._process_handlers:
+                    process_handlers.append(handler_pair)
 
-        handler_for = ActorMeta.handler_deco(actor_handlers)
+        handler_for = ProcessMeta.handler_deco(process_handlers)
 
-        return {"_actor_handlers": actor_handlers,
+        return {"_process_handlers": process_handlers,
                 "handler_for": handler_for,
                 "cls_name": name,
                 "_ids": 0}
 
 
-class Actor(Process, metaclass=ActorMeta):
+class Process(ProcessBase, metaclass=ProcessMeta):
 
     def __init__(self):
         super().__init__()
@@ -229,7 +229,7 @@ class Actor(Process, metaclass=ActorMeta):
         self.__handlers = {}
         self.__ports = {}
 
-        for operation, func in self._actor_handlers:
+        for operation, func in self._process_handlers:
             # Preferably get overriden method by name from instance
             method = getattr(self, func.__name__, None)
 
@@ -260,9 +260,9 @@ class Actor(Process, metaclass=ActorMeta):
             port.activate()
         super().start()
 
-    def connect(self, port_name, to_actor, to_operation):
+    def connect(self, port_name, to_process, to_operation):
         port = self.__ports[port_name]
-        port.add_target(to_actor, to_operation)
+        port.add_target(to_process, to_operation)
 
     def _add_callback(self, operation, function, message, when=Reactor.NOW):
         self.call(function, message, when=when)
@@ -283,7 +283,7 @@ class Actor(Process, metaclass=ActorMeta):
         self._add_callback(operation, f, message)
 
 
-class Intercepted(Actor):
+class Intercepted(Process):
 
     def __init__(self):
         super().__init__()
@@ -306,7 +306,7 @@ class Intercepted(Actor):
 
         # Because _add_callback is the only function, which is called from
         # another thread and method self.before_schedule can modify this
-        # actor's state, we need to put it into critical section
+        # process's state, we need to put it into critical section
         with self.__intercept_lock:
             self.before_schedule(execution_id, operation, function, message)
 
@@ -319,8 +319,8 @@ class Intercepted(Actor):
         super()._add_callback(operation, intercepted_function, message, when=when)
 
 
-class Monitored(Actor):
-    """ Allows the Actor object to be monitored by supervisors.
+class Monitored(Process):
+    """ Allows the Process object to be monitored by supervisors.
     """
 
     def __init__(self):
@@ -366,16 +366,16 @@ class Monitored(Actor):
         super()._add_callback(operation, try_function, message, when=when)
 
 
-class Timer(Actor):
+class Timer(Process):
 
     def set_reactor(self, reactor):
         if not isinstance(reactor, TimedReactor):
             raise TypeError("Loop for Timer must be TimedLoop instance!")
         super().set_reactor(reactor)
 
-    def register_timer(self, to_actor):
-        timer_port = to_actor.make_port("_my_timer")
-        to_actor.connect("_my_timer", self, "_after")
+    def register_timer(self, to_process):
+        timer_port = to_process.make_port("_my_timer")
+        to_process.connect("_my_timer", self, "_after")
         return timer_port
 
     def add_timeout(self, callback, after, message=None):
@@ -432,7 +432,7 @@ class Stats:
             a.add(b.value)
 
 
-class Measured(Intercepted, Actor):
+class Measured(Intercepted, Process):
 
     class Execution:
 
@@ -485,19 +485,19 @@ class Measured(Intercepted, Actor):
         return total
 
     def print_stats(self):
-        print("\n# STATS for actor '{}':".format(self.name))
+        print("\n# STATS for process '{}':".format(self.name))
         print("sorted by number of runs. (total time[s]/runs = avg time[s])")
         for stats in self.get_stats():
             print(stats)
         print(self.get_total_stats())
 
 
-class Supervisor(Actor):
+class Supervisor(Process):
 
     def __init__(self, timer, children=[], probe_period=30, timeout_period=10):
         super().__init__()
         self.timer = timer.register_timer(self)
-        self.__supervised_actors = set()
+        self.__supervised_processes = set()
 
         self.__ping_q = set()
         self.__stop_q = set()
@@ -507,39 +507,39 @@ class Supervisor(Actor):
         self.__probe_period = probe_period
 
         # Echo timeouts after this many seconds. Ie. this means the time period
-        # after which a supervised actor should be recognized as dead
+        # after which a supervised process should be recognized as dead
         self.__failure_timeout_period = timeout_period
 
-        # Make sure that all actors are evaluated of one round of probing
+        # Make sure that all processes are evaluated of one round of probing
         # before next round of probing
         if not self.__failure_timeout_period * 2 < self.__probe_period:
             raise Exception("Timeout_period should be at most half the period of probe_period.")
 
         self.stop_sent = False
-        for actor in children:
-            self.supervise(actor)
+        for process in children:
+            self.supervise(process)
 
         self.timer.send((self, "_probe", self.__probe_period))
 
-    def supervise(self, actor):
-        if not isinstance(actor, Monitored):
-            raise Exception("For the actor '{}' to be supervised, add Monitored to its base classes".
-                    format(actor.name))
+    def supervise(self, process):
+        if not isinstance(process, Monitored):
+            raise Exception("For the process '{}' to be supervised, add Monitored to its base classes".
+                    format(process.name))
 
-        self.__supervised_actors.add(actor)
-        actor.set_supervisor(self)
-        actor.connect("_error", self, "_error")
+        self.__supervised_processes.add(process)
+        process.set_supervisor(self)
+        process.connect("_error", self, "_error")
 
     def get_supervised(self):
-        return list(self.__supervised_actors)
+        return list(self.__supervised_processes)
 
     def broadcast(self, operation, msg):
-        for actor in self.get_supervised():
-            actor.send(operation, msg)
+        for process in self.get_supervised():
+            process.send(operation, msg)
 
     @handler_for("_error")
     def error_received(self, error_context):
-        actor, error = error_context.actor, error_context.get_exception()
+        process, error = error_context.process, error_context.get_exception()
         raise error
 
     def all_stopped(self, msg):
@@ -547,8 +547,8 @@ class Supervisor(Actor):
 
     def start(self):
         super().start()
-        for actor in self.get_supervised():
-            actor.start()
+        for process in self.get_supervised():
+            process.start()
 
     # Stopping
     def stop_children(self):
@@ -556,14 +556,14 @@ class Supervisor(Actor):
             self.stop_sent = True
 
             self.timer.send((self, "_stop_check_failures", self.__failure_timeout_period))
-            for actor in self.get_supervised():
-                self.__stop_q.add(actor)
-                actor.send("_stop", None, respond=(self, "_stop_received"))
+            for process in self.get_supervised():
+                self.__stop_q.add(process)
+                process.send("_stop", None, respond=(self, "_stop_received"))
 
     @handler_for("_stop_received")
-    def _stop_received(self, actor):
-        if actor in self.__stop_q:
-            self.__stop_q.remove(actor)
+    def _stop_received(self, process):
+        if process in self.__stop_q:
+            self.__stop_q.remove(process)
             if len(self.__stop_q) == 0:
                 self.all_stopped(None)
 
@@ -572,7 +572,7 @@ class Supervisor(Actor):
         if len(self.__stop_q) > 0:
             self.__stop_q = set()
             logging.warning("""Killing everything ungracefully!
-{} actors haven't responded to stop request in {} s.""".format(len(self.__stop_q),
+{} processes haven't responded to stop request in {} s.""".format(len(self.__stop_q),
                                                                self.__failure_timeout_period))
         self.all_stopped(None)
 
@@ -581,21 +581,21 @@ class Supervisor(Actor):
         if not self.stop_sent:
             self.__ping_q = set()
 
-            for actor in self.get_supervised():
-                self.__ping_q.add(actor)
-                actor.send("_ping", None, respond=(self, "_pong"))
+            for process in self.get_supervised():
+                self.__ping_q.add(process)
+                process.send("_ping", None, respond=(self, "_pong"))
 
             self.timer.send((self, "_probe", self.__probe_period))
 
     @handler_for("_pong")
-    def _pong(self, actor):
-        if actor in self.__ping_q:
-            self.__ping_q.remove(actor)
+    def _pong(self, process):
+        if process in self.__ping_q:
+            self.__ping_q.remove(process)
 
     @handler_for("_ping_check_failures")
     def ping_check_failures(self, _):
-        for actor in self.__ping_q:
-            self.__ping_q.remove(actor)
-            logging.error("Actor '{}' hasn't responded in {} seconds!".format(actor.name,
+        for process in self.__ping_q:
+            self.__ping_q.remove(process)
+            logging.error("Process '{}' hasn't responded in {} seconds!".format(process.name,
                                                                     self.__failure_timeout_period))
 

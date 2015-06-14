@@ -80,15 +80,15 @@ class Reactor:
 
     NOW = 0.0
 
-    def __init__(self, actors=[]):
+    def __init__(self, processes=[]):
         self._queue = UrgentQueue()
         self.__thread = None
 
-        for actor in actors:
-            self.set_actor(actor)
+        for process in processes:
+            self.set_process(process)
 
-    def set_actor(self, actor):
-        actor.set_reactor(self)
+    def set_process(self, process):
+        process.set_reactor(self)
 
     def start(self):
         self._react()
@@ -130,8 +130,8 @@ class Reactor:
 
 class LoopReactor(Reactor):
 
-    def __init__(self, actors=[]):
-        super().__init__(actors=actors)
+    def __init__(self, processes=[]):
+        super().__init__(processes=processes)
         self.__running = False
 
     def stop(self):
@@ -152,8 +152,8 @@ class LoopReactor(Reactor):
 
 class TimedReactor(LoopReactor):
 
-    def __init__(self, actors=[]):
-        super().__init__(actors=actors)
+    def __init__(self, processes=[]):
+        super().__init__(processes=processes)
 
         # To avoid busy waiting, wait this number of seconds if there is no
         # event to process in an iteration.

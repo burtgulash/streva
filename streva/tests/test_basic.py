@@ -1,7 +1,7 @@
 import queue
 
 import streva.reactor
-from streva.actor import Timer, Measured, Monitored, Supervisor, Actor
+from streva.actor import Timer, Measured, Monitored, Supervisor, Process
 from streva.reactor import LoopReactor, TimedReactor, Emperor
 
 
@@ -12,7 +12,7 @@ class StopProduction(Exception):
     pass
 
 
-class Producer(Monitored, Actor):
+class Producer(Monitored, Process):
 
     def __init__(self, timer, to):
         super().__init__()
@@ -29,7 +29,7 @@ class Producer(Monitored, Actor):
         self.count += 1
 
 
-class Consumer(Monitored, Actor):
+class Consumer(Monitored, Process):
 
     @handler_for("receive")
     def on_receive(self, msg):
@@ -37,7 +37,7 @@ class Consumer(Monitored, Actor):
             raise StopProduction
 
 
-class Supervisor(Supervisor, Actor):
+class Supervisor(Supervisor, Process):
 
     def __init__(self, timer, children=[]):
         super().__init__(timer, children=children, timeout_period=.1, probe_period=.5)
@@ -58,15 +58,15 @@ class Supervisor(Supervisor, Actor):
 
 
 def test_count_to_100():
-    # Define actors
+    # Define processes
     timer = Timer()
     consumer = Consumer()
     producer = Producer(timer, to=consumer)
     supervisor = Supervisor(timer, children=[producer, consumer])
 
     # Define reactors
-    loop = LoopReactor(actors=[consumer, producer, supervisor])
-    timer_loop = TimedReactor(actors=[timer])
+    loop = LoopReactor(processes=[consumer, producer, supervisor])
+    timer_loop = TimedReactor(processes=[timer])
 
     emp = Emperor(children=[loop, timer_loop])
     supervisor.set_emperor(emp)
