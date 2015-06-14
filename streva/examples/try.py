@@ -36,7 +36,7 @@ class Consumer(Measured, Monitored, Actor):
         logging.info("Count is: {}".format(msg))
 
 
-class Supervisor(Supervisor, Timer, Actor):
+class Manager(Supervisor, Timer, Actor):
 
     def __init__(self, name, children=[]):
         super().__init__(name, children=children, timeout_period=1.0, probe_period=4.0)
@@ -78,11 +78,11 @@ class Supervisor(Supervisor, Timer, Actor):
 
 
 # Register keyinterrupt signals to be effective
-def register_stop_signal(supervisor, emperor):
-    supervisor.set_emperor(emperor)
+def register_stop_signal(manager, emperor):
+    manager.set_emperor(emperor)
 
     def signal_stop_handler(sig, frame):
-        supervisor.send("finish", None)
+        manager.send("finish", None)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, signal_stop_handler)
@@ -95,20 +95,20 @@ if __name__ == "__main__":
     # Define actors
     consumer = Consumer("consumer")
     producer = Producer("producer")
-    supervisor = Supervisor("supervisor", children=[consumer, producer])
+    manager = Manager("manager", children=[consumer, producer])
 
     producer.connect("out", consumer, "in")
 
-    producer.connect_timer(supervisor)
-    supervisor.connect_timer(supervisor)
-    supervisor.start()
+    producer.connect_timer(manager)
+    manager.connect_timer(manager)
+    manager.start()
 
     # Define reactors
     loop = LoopReactor(actors=[consumer, producer])
-    timer_loop = TimedReactor(actors=[supervisor])
+    timer_loop = TimedReactor(actors=[manager])
 
     emp = Emperor(children=[loop, timer_loop])
-    register_stop_signal(supervisor, emp)
+    register_stop_signal(manager, emp)
     emp.start()
     emp.join()
 
