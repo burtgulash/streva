@@ -530,7 +530,7 @@ class Supervised(Process):
 
 class Monitor(Process):
 
-    def __init__(self, timer=None, probe_period=.30, timeout_period=.10, **k):
+    def __init__(self, timer=None, probe_period=10.0, timeout_period=4.0, **k):
         super().__init__(timer=timer, **k)
         self.__timer = timer
         self.__monitored_processes = set()
