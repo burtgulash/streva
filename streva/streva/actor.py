@@ -234,7 +234,7 @@ class ProcessMeta(type):
 
 class Process(ProcessBase, metaclass=ProcessMeta):
 
-    def __init__(self):
+    def __init__(self, **k):
         super().__init__()
         self.name = "{} #{}".format(self.cls_name, self.__class__._ids)
         self.__class__._ids += 1
@@ -305,8 +305,8 @@ class Process(ProcessBase, metaclass=ProcessMeta):
 
 class Intercepted(Process):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **k):
+        super().__init__(**k)
         self.__intercept_lock = threading.Lock()
 
     class Id:
@@ -341,8 +341,8 @@ class Intercepted(Process):
 
 class Timer(Process):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **k):
+        super().__init__(**k)
         self.__proxy = Proxy(self, "_after")
 
     def start(self):
@@ -359,7 +359,6 @@ class Timer(Process):
         super().set_reactor(reactor)
 
     def timer_proxy(self):
-        print(self.__proxy)
         return self.__proxy
 
     def add_timeout(self, callback, after, message=None):
@@ -424,8 +423,8 @@ class Measured(Intercepted, Process):
             self.planned_at = None
             self.started_at = None
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **k):
+        super().__init__(**k)
 
         self.last_updated = time.time()
         self.__stats = {}
@@ -486,8 +485,8 @@ class Monitored(Process):
 
 class Supervised(Process):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **k):
+        super().__init__(**k)
         self.supervisor = None
         self.__error_out = self.make_port("_error")
 
@@ -531,8 +530,8 @@ class Supervised(Process):
 
 class Monitor(Process):
 
-    def __init__(self, timer=None, probe_period=.30, timeout_period=.10):
-        super().__init__()
+    def __init__(self, timer=None, probe_period=.30, timeout_period=.10, **k):
+        super().__init__(timer=timer, **k)
         self.__timer = timer
         self.__monitored_processes = set()
 
@@ -588,14 +587,13 @@ class Monitor(Process):
 
 class Supervisor(Process):
 
-    def __init__(self, timer=None):
-        super().__init__()
+    def __init__(self, timer=None, **k):
+        super().__init__(timer=timer, **k)
         self.__supervised_processes = set()
         self.__stop_q = set()
 
         self.STOP_FAILED_AFTER = 5.0
 
-        print(id(timer))
         self.__timer = timer
 
     def spawn(self, actor):
@@ -660,14 +658,10 @@ class Actor(Monitored, Supervised, Process):
     pass
      
 
-class Root(Monitor, Supervisor, Timer, Process):
+class Root(Monitor, Supervisor, Process):
 
-    def __init__(self):
-        Timer.__init__(self)
-        timer = self.timer_proxy()
-        Supervisor.__init__(self, timer=timer)
-        Monitor.__init__(self, timer=timer)
-        #super().__init__(timer=timer)
+    def __init__(self, timer=None):
+        super().__init__(timer=timer)
 
     def spawn(self, actor):
         self.monitor(actor)

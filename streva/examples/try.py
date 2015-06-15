@@ -5,7 +5,7 @@ import queue
 import signal
 import threading
 
-from streva.actor import Actor, Root, Measured, Stats
+from streva.actor import Actor, Root, Measured, Timer, Stats
 from streva.reactor import Reactor, LoopReactor, TimedReactor, Emperor
 
 
@@ -37,8 +37,8 @@ class Consumer(Measured, Actor):
 
 class Supervisor(Root):
 
-    def __init__(self, children=[]):
-        super().__init__()
+    def __init__(self, timer, children=[]):
+        super().__init__(timer=timer)
         self.emperor = None
 
         for child in children:
@@ -93,18 +93,20 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s -- %(message)s", level=logging.INFO)
 
     # Define actors
-    root = Supervisor()
+    timer = Timer()
+    root = Supervisor(timer.timer_proxy())
     consumer = Consumer()
-    producer = Producer(root.timer_proxy())
+    producer = Producer(timer.timer_proxy())
     producer.connect("out", consumer, "in")
 
     root.start()
+    timer.start()
     root.spawn(consumer)
     root.spawn(producer)
 
     # Define reactors
-    loop = LoopReactor(processes=[consumer, producer])
-    timer_loop = TimedReactor(processes=[root])
+    loop = LoopReactor(processes=[consumer, producer, root])
+    timer_loop = TimedReactor(processes=[timer])
 
     emp = Emperor(children=[loop, timer_loop])
     register_stop_signal(root, emp)
