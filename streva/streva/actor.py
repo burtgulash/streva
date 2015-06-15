@@ -83,6 +83,8 @@ class Enablable:
 
     def _enqueue(self, message):
         self.__waiting.append(message)
+        if self.__active:
+            self.__process_waiting()
 
     def active(self):
         return self.__active
@@ -157,10 +159,7 @@ class ProcessBase(Enablable):
         func.add_cleanup_f(cleanup)
 
         if not self.__stopped:
-            if self.active():
-                self._process((func, k))
-            else:
-                self._enqueue((func, k))
+            self._enqueue((func, k))
 
 
 class Proxy(Enablable):
@@ -174,10 +173,7 @@ class Proxy(Enablable):
         self.process.send(self.operation, message)
 
     def send(self, msg):
-        if self.active():
-            self._process(msg)
-        else:
-            self._enqueue(msg)
+        self._enqueue(msg)
 
     def __repr__(self):
         return "Proxy({}.{})".format(self.process, self.operation)
@@ -203,10 +199,7 @@ class Port(Enablable):
             target_process.send(operation, message)
 
     def send(self, message):
-        if self.active():
-            self._process(message)
-        else:
-            self._enqueue(message)
+        self._enqueue(message)
 
 
 class ProcessMeta(type):
@@ -276,14 +269,14 @@ class Process(ProcessBase, metaclass=ProcessMeta):
         return port
 
     def start(self):
+        super().start()
         for port in self.__ports.values():
             port.activate()
-        super().start()
 
     def stop(self):
-        super().stop()
         for port in self.__ports.values():
             port.deactivate()
+        super().stop()
 
     def connect(self, port_name, to_process, to_operation):
         port = self.__ports[port_name]
@@ -366,6 +359,7 @@ class Timer(Process):
         super().set_reactor(reactor)
 
     def timer_proxy(self):
+        print(self.__proxy)
         return self.__proxy
 
     def add_timeout(self, callback, after, message=None):
@@ -537,7 +531,7 @@ class Supervised(Process):
 
 class Monitor(Process):
 
-    def __init__(self, timer=None, probe_period=30, timeout_period=10):
+    def __init__(self, timer=None, probe_period=.30, timeout_period=.10):
         super().__init__()
         self.__timer = timer
         self.__monitored_processes = set()
@@ -573,6 +567,7 @@ class Monitor(Process):
     def _probe(self, _):
         self.__ping_q = set()
 
+        self.__timer.send((self, "_ping_check_failures", self.__failure_timeout_period))
         for process in self.get_monitored():
             self.__ping_q.add(process)
             process.send("_ping", (self, "_pong"))
@@ -600,6 +595,7 @@ class Supervisor(Process):
 
         self.STOP_FAILED_AFTER = 5.0
 
+        print(id(timer))
         self.__timer = timer
 
     def spawn(self, actor):
@@ -667,12 +663,11 @@ class Actor(Monitored, Supervised, Process):
 class Root(Monitor, Supervisor, Timer, Process):
 
     def __init__(self):
-        Process.__init__(self)
         Timer.__init__(self)
-        self.__timer = self.timer_proxy()
-
-        Monitor.__init__(self, timer=self.__timer)
-        Supervisor.__init__(self, timer=self.__timer)
+        timer = self.timer_proxy()
+        Supervisor.__init__(self, timer=timer)
+        Monitor.__init__(self, timer=timer)
+        #super().__init__(timer=timer)
 
     def spawn(self, actor):
         self.monitor(actor)
